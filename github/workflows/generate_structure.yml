@@ -1,0 +1,84 @@
+name: Generate Project Structure
+
+on:
+  workflow_dispatch: # يتيح لك تشغيل الأداة يدوياً بضغطة زر من الهاتف
+
+jobs:
+  build-structure:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Create Directories and Files
+        run: |
+          # 1. المجلدات الرئيسية والملفات في الجذر
+          mkdir -p assets/images assets/fonts
+          touch assets/images/logo.png assets/fonts/cairo.ttf
+          touch pubspec.yaml README.md
+
+          # 2. ملفات Root داخل lib
+          mkdir -p lib
+          touch lib/main.dart lib/app.dart
+
+          # 3. مجلد lib/apps
+          mkdir -p lib/apps
+          touch lib/apps/production_app.dart \
+                lib/apps/warehouse_app.dart \
+                lib/apps/showroom_app.dart \
+                lib/apps/treasury_app.dart \
+                lib/apps/distributor_app.dart
+
+          # 4. مجلد lib/config
+          mkdir -p lib/config
+          touch lib/config/app_config.dart \
+                lib/config/theme.dart \
+                lib/config/routes.dart
+
+          # 5. مجلد lib/core ومجلداته الفرعية
+          mkdir -p lib/core/auth lib/core/constants lib/core/database/migrations lib/core/database/seed lib/core/network lib/core/security lib/core/sync lib/core/utils
+          touch lib/core/auth/auth_guard.dart lib/core/auth/auth_service.dart lib/core/auth/session_manager.dart
+          touch lib/core/constants/api_constants.dart lib/core/constants/app_constants.dart lib/core/constants/db_constants.dart
+          touch lib/core/database/database_helper.dart lib/core/database/migrations/v1_initial_schema.dart lib/core/database/seed/seed_data.dart
+          touch lib/core/network/api_client.dart lib/core/network/api_endpoints.dart lib/core/network/network_checker.dart
+          touch lib/core/security/encryption_service.dart lib/core/security/password_hasher.dart
+          touch lib/core/sync/conflict_resolver.dart lib/core/sync/sync_manager.dart lib/core/sync/sync_queue.dart lib/core/sync/sync_service.dart
+          touch lib/core/utils/date_utils.dart lib/core/utils/number_utils.dart lib/core/utils/printer.dart lib/core/utils/validator.dart
+
+          # 6. مجلد lib/data ومجلداته الفرعية
+          mkdir -p lib/data/models lib/data/repositories lib/data/services
+          touch lib/data/models/audit_log.dart lib/data/models/category.dart lib/data/models/customer.dart lib/data/models/distributor.dart lib/data/models/distributor_load.dart lib/data/models/distributor_return.dart lib/data/models/expense.dart lib/data/models/inventory_count.dart lib/data/models/product.dart lib/data/models/production_batch.dart lib/data/models/production_compare.dart lib/data/models/production_plan.dart lib/data/models/purchase.dart lib/data/models/purchase_item.dart lib/data/models/raw_material.dart lib/data/models/recipe.dart lib/data/models/revenue.dart lib/data/models/sale.dart lib/data/models/sale_item.dart lib/data/models/settings.dart lib/data/models/stock.dart lib/data/models/supplier.dart lib/data/models/treasury.dart lib/data/models/user.dart lib/data/models/worker.dart lib/data/models/worker_account.dart
+          touch lib/data/repositories/audit_log_repository.dart lib/data/repositories/category_repository.dart lib/data/repositories/customer_repository.dart lib/data/repositories/distributor_repository.dart lib/data/repositories/expense_repository.dart lib/data/repositories/inventory_count_repository.dart lib/data/repositories/product_repository.dart lib/data/repositories/production_plan_repository.dart lib/data/repositories/production_repository.dart lib/data/repositories/purchase_item_repository.dart lib/data/repositories/purchase_repository.dart lib/data/repositories/raw_material_repository.dart lib/data/repositories/recipe_repository.dart lib/data/repositories/revenue_repository.dart lib/data/repositories/sale_repository.dart lib/data/repositories/settings_repository.dart lib/data/repositories/stock_repository.dart lib/data/repositories/supplier_repository.dart lib/data/repositories/treasury_repository.dart lib/data/repositories/user_repository.dart lib/data/repositories/worker_account_repository.dart lib/data/repositories/worker_repository.dart
+          touch lib/data/services/distributor_service.dart lib/data/services/expense_service.dart lib/data/services/product_service.dart lib/data/services/production_service.dart lib/data/services/purchase_service.dart lib/data/services/report_service.dart lib/data/services/sale_service.dart lib/data/services/stock_service.dart lib/data/services/sync_service.dart lib/data/services/treasury_service.dart lib/data/services/user_service.dart lib/data/services/worker_service.dart
+
+          # 7. مجلد lib/ui وجميع واجهاته
+          mkdir -p lib/ui/audit lib/ui/auth lib/ui/backup lib/ui/customers lib/ui/dashboard lib/ui/distributors lib/ui/expenses lib/ui/production lib/ui/products lib/ui/purchases lib/ui/raw_materials lib/ui/reports lib/ui/settings lib/ui/showroom lib/ui/suppliers lib/ui/sync lib/ui/tea lib/ui/treasury lib/ui/warehouse lib/ui/widgets lib/ui/workers
+          touch lib/ui/audit/audit_log_screen.dart
+          touch lib/ui/auth/login_screen.dart
+          touch lib/ui/backup/backup_screen.dart
+          touch lib/ui/customers/customers_screen.dart
+          touch lib/ui/dashboard/dashboard_screen.dart
+          touch lib/ui/distributors/distributor_load_screen.dart lib/ui/distributors/distributor_returns_screen.dart lib/ui/distributors/distributor_settle_screen.dart lib/ui/distributors/distributors_screen.dart
+          touch lib/ui/expenses/expenses_screen.dart
+          touch lib/ui/production/production_comparison_screen.dart lib/ui/production/production_list_screen.dart lib/ui/production/production_plan_screen.dart lib/ui/production/production_screen.dart lib/ui/production/production_stats_screen.dart
+          touch lib/ui/products/product_form_screen.dart lib/ui/products/products_screen.dart
+          touch lib/ui/purchases/purchases_screen.dart
+          touch lib/ui/raw_materials/material_form_screen.dart lib/ui/raw_materials/material_screen.dart lib/ui/raw_materials/materials_screen.dart lib/ui/raw_materials/raw_material_detail_screen.dart lib/ui/raw_materials/raw_material_movements_screen.dart
+          touch lib/ui/reports/comparison_report_screen.dart lib/ui/reports/financial_report_screen.dart lib/ui/reports/production_report_screen.dart lib/ui/reports/reports_menu_screen.dart lib/ui/reports/sales_report_screen.dart
+          touch lib/ui/settings/settings_screen.dart
+          touch lib/ui/showroom/deposit_screen.dart lib/ui/showroom/sale_screen.dart lib/ui/showroom/showroom_account_screen.dart lib/ui/showroom/showroom_screen.dart
+          touch lib/ui/suppliers/suppliers_screen.dart
+          touch lib/ui/sync/sync_screen.dart
+          touch lib/ui/tea/transaction_screen.dart
+          touch lib/ui/treasury/treasury_screen.dart
+          touch lib/ui/warehouse/inventory_screen.dart lib/ui/warehouse/transfer_screen.dart lib/ui/warehouse/warehouse_screen.dart
+          touch lib/ui/widgets/confirm_dialog.dart lib/ui/widgets/custom_appbar.dart lib/ui/widgets/data_table_widget.dart lib/ui/widgets/empty_state.dart lib/ui/widgets/error_state.dart lib/ui/widgets/kpi_card.dart lib/ui/widgets/loading_overlay.dart lib/ui/widgets/search_field.dart lib/ui/widgets/status_badge.dart
+          touch lib/ui/workers/worker_account_screen.dart lib/ui/workers/workers_screen.dart
+
+      - name: Commit and Push
+        run: |
+          git config --global user.name "GitHub Action"
+          git config --global user.email "action@github.com"
+          git add .
+          git commit -m "إنشاء هيكلية مشروع AbuLaithERP بالكامل تلقائياً" || exit 0
+          git push
