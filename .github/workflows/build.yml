@@ -37,7 +37,7 @@ jobs:
         run: yes | flutter doctor --android-licenses || true
 
       - name: Recreate Android platform files
-        run: flutter create . --platforms=android
+        run: flutter create . --project-name=abu_laith_erp --platforms=android
 
       - name: Install Dependencies
         run: flutter pub get
