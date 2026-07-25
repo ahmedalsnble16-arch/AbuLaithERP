@@ -3,6 +3,10 @@ name: Generate Project Structure
 on:
   workflow_dispatch: # يتيح لك تشغيل الأداة يدوياً بضغطة زر من الهاتف
 
+# منح صلاحية الكتابة للمستودع تلقائياً لتفادي خطأ 128
+permissions:
+  contents: write
+
 jobs:
   build-structure:
     runs-on: ubuntu-latest
