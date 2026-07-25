@@ -11,13 +11,25 @@ jobs:
         with:
           flutter-version: '3.16.0'
       
-      - name: Unzip and Build
+      - name: Unzip project
         run: |
-          unzip AbuLaithERP.zip
+          unzip -o AbuLaithERP.zip
+          ls -la
+          ls -la AbuLaithERP/
+      
+      - name: Build APK
+        run: |
           cd AbuLaithERP
           flutter create . --project-name abu_laith_erp --org com.abulaith .
           flutter pub get
+          flutter analyze 2>&1 | tee analysis.txt
           flutter build apk --release
+      
+      - name: Upload Analysis Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: analysis-report
+          path: AbuLaithERP/analysis.txt
       
       - name: Upload APK
         uses: actions/upload-artifact@v4
