@@ -1,0 +1,43 @@
+name: abu_laith_erp
+description: نظام أبو ليث ERP - نظام محاسبي وإداري ومخزني وإنتاجي متكامل
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.1.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  
+  sqflite: ^2.3.0
+  path: ^1.8.3
+  provider: ^6.1.1
+  shared_preferences: ^2.2.2
+  http: ^1.1.0
+  connectivity_plus: ^5.0.2
+  crypto: ^3.0.3
+  uuid: ^4.2.1
+  fl_chart: ^0.65.0
+  pdf: ^3.10.4
+  excel: ^2.1.0
+  printing: ^5.11.0
+  barcode_widget: ^2.0.4
+  intl: ^0.18.1
+  image_picker: ^1.0.4
+  path_provider: ^2.1.1
+  package_info_plus: ^5.0.1
+  google_fonts: ^6.1.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.1
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/
+  fonts:
+    - family: Cairo
+      fonts:
+        - asset: assets/fonts/cairo.ttf
