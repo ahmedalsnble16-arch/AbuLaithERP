@@ -1,9 +1,9 @@
-name: Build APK with Analysis
+name: Analyze Code
 
 on: push
 
 jobs:
-  analyze-and-build:
+  analyze:
     runs-on: ubuntu-latest
 
     steps:
@@ -15,12 +15,7 @@ jobs:
         with:
           flutter-version: '3.16.0'
 
-      - name: Remove old Android folder
-        run: |
-          rm -rf android
-          rm -rf .dart_tool
-
-      - name: Create fresh Android platform files
+      - name: Create Android platform files
         run: |
           flutter create . --project-name abu_laith_erp --org com.abulaith --platforms android
 
@@ -36,12 +31,3 @@ jobs:
         with:
           name: analysis-report
           path: analysis_report.txt
-
-      - name: Build APK
-        run: flutter build apk --release
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: app-release
-          path: build/app/outputs/flutter-apk/app-release.apk
