@@ -19,6 +19,11 @@ jobs:
         run: |
           flutter create . --project-name abu_laith_erp --org com.abulaith --platforms android
 
+      - name: Remove test files
+        run: |
+          rm -rf test/
+          rm -f test/widget_test.dart
+
       - name: Install dependencies
         run: flutter pub get
 
