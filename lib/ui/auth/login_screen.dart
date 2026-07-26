@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import '../../config/theme.dart';
 import '../../core/auth/session_manager.dart';
 import '../../data/repositories/user_repository.dart';
-import '../dashboard/dashboard_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -72,7 +71,6 @@ class _LoginScreenState extends State<LoginScreen> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  // الشعار
                   Container(
                     width: 120,
                     height: 120,
@@ -85,7 +83,6 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                   ),
                   const SizedBox(height: 16),
-                  // اسم النظام
                   const Text(
                     'أبو ليث ERP',
                     style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white),
@@ -96,7 +93,6 @@ class _LoginScreenState extends State<LoginScreen> {
                     style: TextStyle(fontSize: 14, color: Colors.white70),
                   ),
                   const SizedBox(height: 40),
-                  // بطاقة تسجيل الدخول
                   Card(
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                     elevation: 8,
@@ -109,7 +105,6 @@ class _LoginScreenState extends State<LoginScreen> {
                             style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: AppTheme.textPrimaryColor),
                           ),
                           const SizedBox(height: 24),
-                          // اسم المستخدم
                           TextFormField(
                             controller: _usernameController,
                             decoration: const InputDecoration(
@@ -119,7 +114,6 @@ class _LoginScreenState extends State<LoginScreen> {
                             validator: (v) => v == null || v.trim().isEmpty ? 'مطلوب' : null,
                           ),
                           const SizedBox(height: 16),
-                          // كلمة المرور
                           TextFormField(
                             controller: _passwordController,
                             obscureText: _obscurePassword,
@@ -134,7 +128,6 @@ class _LoginScreenState extends State<LoginScreen> {
                             validator: (v) => v == null || v.trim().isEmpty ? 'مطلوب' : null,
                           ),
                           const SizedBox(height: 24),
-                          // زر الدخول
                           SizedBox(
                             width: double.infinity,
                             height: 50,
@@ -150,7 +143,6 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                   ),
                   const SizedBox(height: 24),
-                  // إصدار النظام
                   const Text('الإصدار 1.0.0', style: TextStyle(color: Colors.white60, fontSize: 12)),
                 ],
               ),
