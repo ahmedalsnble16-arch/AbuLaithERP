@@ -23,13 +23,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _load() async {
     final db = await DatabaseHelper().database;
     final maps = await db.query(DBConstants.tableSettings);
-    setState(() { _settings = {for (var m in maps) m['key'] as String: m['value'] as String}; _isLoading = false; });
-  }
-
-  Future<void> _update(String key, String value) async {
-    final db = await DatabaseHelper().database;
-    await db.insert(DBConstants.tableSettings, {'key': key, 'value': value, 'updated_at': DatabaseHelper.now}, conflictAlgorithm: ConflictAlgorithm.replace);
-    _load();
+    setState(() {
+      _settings = {for (var m in maps) m['key'] as String: m['value'] as String};
+      _isLoading = false;
+    });
   }
 
   @override
