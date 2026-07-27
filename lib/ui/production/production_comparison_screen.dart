@@ -49,12 +49,12 @@ class _ProductionComparisonScreenState extends State<ProductionComparisonScreen>
                 itemCount: _batches.length,
                 itemBuilder: (context, index) {
                   final b = _batches[index];
-                  final expected = b['expected_pieces'] as int? ?? 0;
-                  final good = b['good_pieces'] as int? ?? 0;
-                  final damaged = b['damaged_pieces'] as int? ?? 0;
-                  final lost = b['lost_pieces'] as int? ?? 0;
+                  final expected = (b['expected_pieces'] as num?)?.toDouble() ?? 0.0;
+                  final good = (b['good_pieces'] as num?)?.toDouble() ?? 0.0;
+                  final damaged = (b['damaged_pieces'] as num?)?.toDouble() ?? 0.0;
+                  final lost = (b['lost_pieces'] as num?)?.toDouble() ?? 0.0;
                   final loss = damaged + lost;
-                  final lossPercent = expected > 0 ? (loss / expected) * 100 : 0;
+                  final lossPercent = expected > 0 ? (loss / expected) * 100 : 0.0;
 
                   return Card(
                     color: _getColor(lossPercent).withAlpha(20),
@@ -70,15 +70,15 @@ class _ProductionComparisonScreenState extends State<ProductionComparisonScreen>
                               Expanded(
                                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                                   const Text('المخطط:', style: TextStyle(color: Colors.blueGrey)),
-                                  Text('القطع: $expected'),
+                                  Text('القطع: ${expected.toInt()}'),
                                 ]),
                               ),
                               Expanded(
                                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                                   const Text('الفعلي:', style: TextStyle(color: Colors.blueGrey)),
-                                  Text('صالح: $good'),
-                                  Text('تالف: $damaged'),
-                                  Text('فاقد: $lost'),
+                                  Text('صالح: ${good.toInt()}'),
+                                  Text('تالف: ${damaged.toInt()}'),
+                                  Text('فاقد: ${lost.toInt()}'),
                                 ]),
                               ),
                             ],
