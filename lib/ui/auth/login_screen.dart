@@ -11,11 +11,19 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
+  // 1. إصلاح المشكلة: تم جعل اسم المستخدم الافتراضي 'admin' فقط للراحة، وترك كلمة المرور فارغة بالكامل.
   final _usernameController = TextEditingController(text: 'admin');
-  final _passwordController = TextEditingController(text: 'admin123');
+  final _passwordController = TextEditingController(); // <-- فارغة تماماً
   final _formKey = GlobalKey<FormState>();
   bool _isLoading = false;
   bool _obscurePassword = true;
+
+  @override
+  void dispose() {
+    _usernameController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
 
   Future<void> _login() async {
     if (!_formKey.currentState!.validate()) return;
@@ -40,12 +48,14 @@ class _LoginScreenState extends State<LoginScreen> {
           if (!mounted) return;
           Navigator.pushReplacementNamed(context, '/dashboard');
         } catch (e) {
+          if (!mounted) return;
           _showError('خطأ في حفظ الجلسة: $e');
         }
       } else {
         _showError('اسم المستخدم أو كلمة المرور غير صحيحة');
       }
     } catch (e) {
+      if (!mounted) return;
       _showError('حدث خطأ غير متوقع: $e');
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -119,9 +129,12 @@ class _LoginScreenState extends State<LoginScreen> {
                             validator: (v) => v == null || v.trim().isEmpty ? 'مطلوب' : null,
                           ),
                           const SizedBox(height: 16),
+                          // 2. إصلاح المشكلة: تم تعطيل الاقتراحات والتصحيح التلقائي لحقل كلمة المرور
                           TextFormField(
                             controller: _passwordController,
                             obscureText: _obscurePassword,
+                            enableSuggestions: false,
+                            autocorrect: false,
                             decoration: InputDecoration(
                               labelText: 'كلمة المرور',
                               prefixIcon: const Icon(Icons.lock),
