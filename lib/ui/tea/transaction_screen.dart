@@ -21,8 +21,11 @@ class _TransactionScreenState extends State<TransactionScreen> {
   Future<void> _loadTransactions() async {
     final db = await DatabaseHelper().database;
     String where = 'deleted = 0';
-    if (_filter == 'قبض') where += " AND transaction_type = 'قبض'";
-    else if (_filter == 'صرف') where += " AND transaction_type = 'صرف'";
+    if (_filter == 'قبض') {
+      where += " AND transaction_type = 'قبض'";
+    } else if (_filter == 'صرف') {
+      where += " AND transaction_type = 'صرف'";
+    }
     final maps = await db.query(DBConstants.tableTreasury, where: where, orderBy: 'transaction_date DESC', limit: 200);
     setState(() { _transactions = maps; _isLoading = false; });
   }
