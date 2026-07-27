@@ -12,7 +12,6 @@ class SyncScreen extends StatefulWidget {
 class _SyncScreenState extends State<SyncScreen> {
   final SyncService _syncService = SyncService();
   int _pendingCount = 0;
-  String? _lastSync;
   bool _isSyncing = false;
   String _statusMessage = '';
   bool _hasInternet = false;
@@ -26,7 +25,6 @@ class _SyncScreenState extends State<SyncScreen> {
   Future<void> _loadStatus() async {
     _hasInternet = await _syncService.hasInternet();
     _pendingCount = await _syncService.getPendingCount();
-    _lastSync = await _syncService.getLastSyncTime();
     setState(() {});
   }
 
@@ -53,7 +51,7 @@ class _SyncScreenState extends State<SyncScreen> {
             Row(children: [
               Expanded(child: _buildInfoCard('عمليات معلقة', '$_pendingCount', AppTheme.warningColor)),
               const SizedBox(width: 8),
-              Expanded(child: _buildInfoCard('آخر مزامنة', _lastSync ?? 'لا يوجد', AppTheme.primaryColor)),
+              Expanded(child: _buildInfoCard('آخر مزامنة', 'قريباً', AppTheme.primaryColor)),
             ]),
             const SizedBox(height: 20),
             ElevatedButton.icon(onPressed: _isSyncing ? null : _syncNow, icon: _isSyncing ? const CircularProgressIndicator() : const Icon(Icons.sync), label: Text(_isSyncing ? 'جاري المزامنة...' : 'مزامنة الآن')),
