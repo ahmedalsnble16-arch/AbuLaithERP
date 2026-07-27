@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'config/theme.dart';
 import 'config/routes.dart';
+import 'core/auth/auth_guard.dart';
 
 class AbuLaithERPApp extends StatelessWidget {
   const AbuLaithERPApp({super.key});
@@ -24,9 +25,10 @@ class AbuLaithERPApp extends StatelessWidget {
       initialRoute: '/',
       routes: AppRoutes.routes,
       builder: (context, child) {
+        if (child == null) return const SizedBox.shrink();
         return Directionality(
           textDirection: TextDirection.rtl,
-          child: child!,
+          child: AuthGuard.guard(context, child),
         );
       },
     );
