@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import '../../config/theme.dart';
 import '../../data/models/product.dart';
 import '../../data/repositories/product_repository.dart';
 import '../../core/database/database_helper.dart';
@@ -16,8 +15,8 @@ class DistributorReturnsScreen extends StatefulWidget {
 class _DistributorReturnsScreenState extends State<DistributorReturnsScreen> {
   final ProductRepository _productRepo = ProductRepository();
   List<Product> _products = [];
-  Map<String, int> _returned = {};
-  Map<String, int> _damaged = {};
+  final Map<String, int> _returned = {};
+  final Map<String, int> _damaged = {};
   bool _isLoading = true;
 
   @override
@@ -30,7 +29,10 @@ class _DistributorReturnsScreenState extends State<DistributorReturnsScreen> {
     final products = await _productRepo.getAll();
     setState(() {
       _products = products.where((p) => p.active).toList();
-      for (var p in _products) { _returned[p.id] = 0; _damaged[p.id] = 0; }
+      for (var p in _products) {
+        _returned[p.id] = 0;
+        _damaged[p.id] = 0;
+      }
       _isLoading = false;
     });
   }
