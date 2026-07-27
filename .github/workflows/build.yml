@@ -1,38 +1,45 @@
-name: Analyze Code
+name: Build APK
 
-on: push
+on:
+  push:
+    branches: [ main ]
 
 jobs:
-  analyze:
+  build:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
-
+      - uses: actions/checkout@v3
+      
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.16.0'
-
-      - name: Create Android platform files
+      
+      - name: Remove old Android folder
         run: |
-          flutter create . --project-name abu_laith_erp --org com.abulaith --platforms android
-
-      - name: Remove test files
-        run: |
-          rm -rf test/
-          rm -f test/widget_test.dart
-
+          rm -rf android
+          rm -rf .dart_tool
+      
+      - name: Create fresh Android platform files
+        run: flutter create . --project-name abu_laith_erp --org com.abulaith --platforms android
+      
       - name: Install dependencies
         run: flutter pub get
-
+      
       - name: Analyze code
-        run: |
-          flutter analyze 2>&1 | tee analysis_report.txt
-
+        run: flutter analyze 2>&1 | tee analysis_report.txt
+      
       - name: Upload Analysis Report
         uses: actions/upload-artifact@v4
         with:
           name: analysis-report
           path: analysis_report.txt
+      
+      - name: Build APK
+        run: flutter build apk --release
+      
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release
+          path: build/app/outputs/flutter-apk/app-release.apk
