@@ -24,4 +24,52 @@ class StockRepository {
     
     return await db.rawQuery(sql, args);
   }
+
+  Future<bool> deductStock(String productId, int quantity) async {
+    final db = await _dbHelper.database;
+    final stock = await _getStockByProductId(productId);
+    if (stock == null || stock['available_quantity'] < quantity) return false;
+    
+    await db.update(
+      DBConstants.tableStock,
+      {
+        'quantity_pieces': stock['quantity_pieces'] - quantity,
+        'updated_at': DateTime.now().toIso8601String(),
+      },
+      where: 'product_id = ?',
+      whereArgs: [productId],
+    );
+    return true;
+  }
+
+  Future<void> addStock(String productId, int quantity) async {
+    final db = await _dbHelper.database;
+    final stock = await _getStockByProductId(productId);
+    if (stock != null) {
+      await db.update(
+        DBConstants.tableStock,
+        {
+          'quantity_pieces': stock['quantity_pieces'] + quantity,
+          'updated_at': DateTime.now().toIso8601String(),
+        },
+        where: 'product_id = ?',
+        whereArgs: [productId],
+      );
+    }
+  }
+
+  Future<Map<String, dynamic>?> _getStockByProductId(String productId) async {
+    final db = await _dbHelper.database;
+    final maps = await db.query(
+      DBConstants.tableStock,
+      where: 'product_id = ?',
+      whereArgs: [productId],
+    );
+    if (maps.isEmpty) return null;
+    return {
+      'quantity_pieces': maps.first['quantity_pieces'] as int? ?? 0,
+      'reserved_quantity': maps.first['reserved_quantity'] as int? ?? 0,
+      'available_quantity': (maps.first['quantity_pieces'] as int? ?? 0) - (maps.first['reserved_quantity'] as int? ?? 0),
+    };
+  }
 }
