@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'package:connectivity_plus/connectivity_plus.dart';
-import 'package:http/http.dart' as http;
 import 'package:uuid/uuid.dart';
 import '../../core/constants/db_constants.dart';
 import '../../core/database/database_helper.dart';
@@ -12,12 +11,6 @@ class SyncService {
 
   final DatabaseHelper _dbHelper = DatabaseHelper();
   final Uuid _uuid = const Uuid();
-
-  String _serverUrl = 'https://api.abulaith-erp.com/api';
-
-  void setServerUrl(String url) {
-    _serverUrl = url;
-  }
 
   Future<bool> hasInternet() async {
     final result = await Connectivity().checkConnectivity();
