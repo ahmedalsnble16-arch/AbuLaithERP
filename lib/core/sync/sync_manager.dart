@@ -1,5 +1,4 @@
 import 'sync_queue.dart';
-import 'conflict_resolver.dart';
 import '../network/network_checker.dart';
 import '../database/database_helper.dart';
 import '../../core/constants/db_constants.dart';
@@ -9,7 +8,6 @@ import '../../core/constants/api_constants.dart';
 
 class SyncManager {
   final SyncQueue _queue = SyncQueue();
-  final ConflictResolver _resolver = ConflictResolver();
 
   Future<Map<String, dynamic>> syncAll() async {
     if (!await NetworkChecker.hasInternet()) {
