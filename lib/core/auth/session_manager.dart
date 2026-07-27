@@ -22,7 +22,11 @@ class SessionManager {
   }
 
   Future<void> saveUser(User user) async {
-    await _prefs?.setString(_keyUser, jsonEncode(user.toMap()));
+    if (_prefs == null) {
+      await init();
+    }
+    final userData = jsonEncode(user.toMap());
+    await _prefs?.setString(_keyUser, userData);
     await _prefs?.setBool(_keyIsLoggedIn, true);
   }
 
