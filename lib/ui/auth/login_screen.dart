@@ -29,19 +29,24 @@ class _LoginScreenState extends State<LoginScreen> {
         _passwordController.text.trim(),
       );
 
-      if (user != null && mounted) {
-        final sessionManager = SessionManager();
-        await sessionManager.init();
-        await sessionManager.saveUser(user);
+      if (!mounted) return;
 
-        if (mounted) {
+      if (user != null) {
+        try {
+          final sessionManager = SessionManager();
+          await sessionManager.init();
+          await sessionManager.saveUser(user);
+
+          if (!mounted) return;
           Navigator.pushReplacementNamed(context, '/dashboard');
+        } catch (e) {
+          _showError('خطأ في حفظ الجلسة: $e');
         }
       } else {
         _showError('اسم المستخدم أو كلمة المرور غير صحيحة');
       }
     } catch (e) {
-      _showError('حدث خطأ: ${e.toString()}');
+      _showError('حدث خطأ غير متوقع: $e');
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -52,7 +57,7 @@ class _LoginScreenState extends State<LoginScreen> {
       SnackBar(
         content: Text(message, textAlign: TextAlign.center),
         backgroundColor: AppTheme.errorColor,
-        duration: const Duration(seconds: 3),
+        duration: const Duration(seconds: 4),
         behavior: SnackBarBehavior.floating,
       ),
     );
