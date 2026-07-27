@@ -56,6 +56,6 @@ class ExpenseRepository {
       FROM ${DBConstants.tableExpenses}
       WHERE expense_date = ? AND deleted = 0
     ''', [today]);
-    return (result.first['total'] ?? 0).toDouble();
+    return (result.first['total'] as num?)?.toDouble() ?? 0.0;
   }
 }
