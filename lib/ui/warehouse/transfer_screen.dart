@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import '../../config/theme.dart';
 import '../../core/database/database_helper.dart';
 import '../../data/models/product.dart';
 import '../../data/repositories/product_repository.dart';
@@ -28,6 +27,7 @@ class _TransferScreenState extends State<TransferScreen> {
 
   Future<void> _loadProducts() async {
     final products = await _productRepo.getAll();
+    if (!mounted) return;
     setState(() {
       _products = products.where((p) => p.active).toList();
       _isLoading = false;
@@ -38,11 +38,13 @@ class _TransferScreenState extends State<TransferScreen> {
     if (_selectedProduct == null) return;
     final qty = int.tryParse(_quantityController.text) ?? 0;
     if (qty <= 0) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('أدخل كمية صحيحة')));
       return;
     }
 
     final success = await _stockRepo.deductStock(_selectedProduct!.id, qty);
+    if (!mounted) return;
     if (!success) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('الكمية غير متوفرة')));
       return;
@@ -64,6 +66,7 @@ class _TransferScreenState extends State<TransferScreen> {
       await db.update('showroom_stock', {'quantity': current + qty, 'updated_at': DateTime.now().toIso8601String()}, where: 'product_id = ?', whereArgs: [_selectedProduct!.id]);
     }
 
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم التحويل إلى المعرض')));
     Navigator.pop(context);
   }
