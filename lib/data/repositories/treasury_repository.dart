@@ -103,7 +103,7 @@ class TreasuryRepository {
       WHERE deleted = 0 AND status = 'معتمدة'
     ''');
     if (result.isEmpty) return 0;
-    return (result.first['balance'] ?? 0).toDouble();
+    return (result.first['balance'] as num?)?.toDouble() ?? 0.0;
   }
 
   Future<double> getTodayReceipts() async {
@@ -114,7 +114,7 @@ class TreasuryRepository {
       FROM ${DBConstants.tableTreasury}
       WHERE transaction_type = 'قبض' AND transaction_date = ? AND deleted = 0
     ''', [today]);
-    return (result.first['total'] ?? 0).toDouble();
+    return (result.first['total'] as num?)?.toDouble() ?? 0.0;
   }
 
   Future<double> getTodayPayments() async {
@@ -125,6 +125,6 @@ class TreasuryRepository {
       FROM ${DBConstants.tableTreasury}
       WHERE transaction_type = 'صرف' AND transaction_date = ? AND deleted = 0
     ''', [today]);
-    return (result.first['total'] ?? 0).toDouble();
+    return (result.first['total'] as num?)?.toDouble() ?? 0.0;
   }
 }
