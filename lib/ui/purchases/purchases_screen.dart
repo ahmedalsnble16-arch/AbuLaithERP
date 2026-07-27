@@ -49,13 +49,13 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
               children: [
                 DropdownButtonFormField<String>(
                   decoration: const InputDecoration(labelText: 'المورد *'),
-                  items: _suppliers.map((s) => DropdownMenuItem(value: s['id'], child: Text(s['name'] ?? ''))).toList(),
+                  items: _suppliers.map<DropdownMenuItem<String>>((s) => DropdownMenuItem<String>(value: s['id'] as String, child: Text(s['name'] ?? ''))).toList(),
                   onChanged: (v) => setDialogState(() => selectedSupplier = v),
                 ),
                 const SizedBox(height: 8),
                 DropdownButtonFormField<String>(
                   decoration: const InputDecoration(labelText: 'المادة *'),
-                  items: _materials.map((m) => DropdownMenuItem(value: m['id'], child: Text(m['name'] ?? ''))).toList(),
+                  items: _materials.map<DropdownMenuItem<String>>((m) => DropdownMenuItem<String>(value: m['id'] as String, child: Text(m['name'] ?? ''))).toList(),
                   onChanged: (v) => setDialogState(() => selectedMaterial = v),
                 ),
                 const SizedBox(height: 8),
