@@ -33,20 +33,20 @@ class User {
 
   factory User.fromMap(Map<String, dynamic> map) {
     return User(
-      id: map['id'] ?? '',
-      fullName: map['full_name'] ?? '',
-      username: map['username'] ?? '',
-      passwordHash: map['password_hash'] ?? '',
-      roleId: map['role_id'] ?? '',
-      phone: map['phone'],
-      email: map['email'],
-      deviceId: map['device_id'],
-      lastLogin: map['last_login'],
-      active: map['active'] == 1,
-      createdAt: map['created_at'] ?? '',
-      updatedAt: map['updated_at'] ?? '',
-      createdBy: map['created_by'],
-      syncStatus: map['sync_status'],
+      id: map['id']?.toString() ?? '',
+      fullName: map['full_name']?.toString() ?? '',
+      username: map['username']?.toString() ?? '',
+      passwordHash: map['password_hash']?.toString() ?? '',
+      roleId: map['role_id']?.toString() ?? '',
+      phone: map['phone']?.toString(),
+      email: map['email']?.toString(),
+      deviceId: map['device_id']?.toString(),
+      lastLogin: map['last_login']?.toString(),
+      active: map['active'] == 1 || map['active'] == true,
+      createdAt: map['created_at']?.toString() ?? DateTime.now().toIso8601String(),
+      updatedAt: map['updated_at']?.toString() ?? DateTime.now().toIso8601String(),
+      createdBy: map['created_by']?.toString(),
+      syncStatus: map['sync_status']?.toString(),
     );
   }
 
@@ -62,10 +62,10 @@ class User {
       'device_id': deviceId,
       'last_login': lastLogin,
       'active': active ? 1 : 0,
-      'created_at': createdAt,
-      'updated_at': updatedAt,
+      'created_at': createdAt.isNotEmpty ? createdAt : DateTime.now().toIso8601String(),
+      'updated_at': updatedAt.isNotEmpty ? updatedAt : DateTime.now().toIso8601String(),
       'created_by': createdBy,
-      'sync_status': syncStatus,
+      'sync_status': syncStatus ?? 'Pending',
     };
   }
 
