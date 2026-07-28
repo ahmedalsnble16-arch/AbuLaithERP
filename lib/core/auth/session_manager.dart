@@ -17,23 +17,30 @@ class SessionManager {
     return _instance!;
   }
 
-  Future<void> init() async {
+  Future<SharedPreferences> get prefs async {
     _prefs ??= await SharedPreferences.getInstance();
+    return _prefs!;
+  }
+
+  Future<void> init() async {
+    _prefs = await SharedPreferences.getInstance();
   }
 
   Future<void> saveUser(User user) async {
-    if (_prefs == null) {
-      await init();
+    try {
+      final p = await prefs;
+      final userData = jsonEncode(user.toMap());
+      await p.setString(_keyUser, userData);
+      await p.setBool(_keyIsLoggedIn, true);
+    } catch (e) {
+      // فشل الحفظ - لا نرمي خطأ
     }
-    final userData = jsonEncode(user.toMap());
-    await _prefs?.setString(_keyUser, userData);
-    await _prefs?.setBool(_keyIsLoggedIn, true);
   }
 
   User? getCurrentUser() {
-    final userData = _prefs?.getString(_keyUser);
-    if (userData == null) return null;
     try {
+      final userData = _prefs?.getString(_keyUser);
+      if (userData == null || userData.isEmpty) return null;
       final Map<String, dynamic> map = jsonDecode(userData);
       return User.fromMap(map);
     } catch (e) {
@@ -42,15 +49,28 @@ class SessionManager {
   }
 
   bool isLoggedIn() {
-    return _prefs?.getBool(_keyIsLoggedIn) ?? false;
+    try {
+      return _prefs?.getBool(_keyIsLoggedIn) ?? false;
+    } catch (e) {
+      return false;
+    }
   }
 
   String? getToken() {
-    return _prefs?.getString(_keyToken);
+    try {
+      return _prefs?.getString(_keyToken);
+    } catch (e) {
+      return null;
+    }
   }
 
   Future<void> saveToken(String token) async {
-    await _prefs?.setString(_keyToken, token);
+    try {
+      final p = await prefs;
+      await p.setString(_keyToken, token);
+    } catch (e) {
+      // فشل الحفظ
+    }
   }
 
   String? getCurrentUserId() {
@@ -66,8 +86,13 @@ class SessionManager {
   }
 
   Future<void> logout() async {
-    await _prefs?.remove(_keyUser);
-    await _prefs?.remove(_keyToken);
-    await _prefs?.setBool(_keyIsLoggedIn, false);
+    try {
+      final p = await prefs;
+      await p.remove(_keyUser);
+      await p.remove(_keyToken);
+      await p.setBool(_keyIsLoggedIn, false);
+    } catch (e) {
+      // فشل تسجيل الخروج
+    }
   }
 }
