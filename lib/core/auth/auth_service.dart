@@ -3,23 +3,25 @@ import 'session_manager.dart';
 
 class AuthService {
   final UserRepository _userRepo = UserRepository();
-  final SessionManager _session = SessionManager();
 
   Future<bool> login(String username, String password) async {
     final user = await _userRepo.login(username, password);
     if (user != null) {
-      await _session.init();
-      await _session.saveUser(user);
+      await SessionManager.saveUser(
+        id: user.id,
+        username: user.username,
+        role: user.roleId,
+      );
       return true;
     }
     return false;
   }
 
   Future<void> logout() async {
-    await _session.logout();
+    await SessionManager.logout();
   }
 
-  bool isLoggedIn() {
-    return _session.isLoggedIn();
+  Future<bool> isLoggedIn() async {
+    return await SessionManager.isLoggedIn();
   }
 }
