@@ -39,15 +39,6 @@ class _LoginScreenState extends State<LoginScreen> {
       if (!mounted) return;
 
       if (user != null) {
-        // فحص إضافي: هل يوجد أي قيمة null في toMap()؟
-        final userMap = user.toMap();
-        if (userMap.containsValue(null)) {
-          if (!mounted) return;
-          _showError('بيانات المستخدم غير مكتملة');
-          setState(() => _isLoading = false);
-          return;
-        }
-
         try {
           final sessionManager = SessionManager();
           await sessionManager.init();
