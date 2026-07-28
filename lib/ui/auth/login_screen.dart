@@ -40,9 +40,11 @@ class _LoginScreenState extends State<LoginScreen> {
 
       if (user != null) {
         try {
-          final sessionManager = SessionManager();
-          await sessionManager.init();
-          await sessionManager.saveUser(user);
+          await SessionManager.saveUser(
+            id: user.id,
+            username: user.username,
+            role: user.roleId,
+          );
 
           if (!mounted) return;
           Navigator.pushReplacementNamed(context, '/dashboard');
