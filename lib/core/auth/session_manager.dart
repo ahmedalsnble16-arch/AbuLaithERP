@@ -1,98 +1,53 @@
-import 'package:shared_preferences/shared_preferences.dart';
-import '../../data/models/user.dart';
-import 'dart:convert';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 class SessionManager {
-  static SessionManager? _instance;
-  static SharedPreferences? _prefs;
+  static const _storage = FlutterSecureStorage();
+  
+  static const _keyUserId = 'user_id';
+  static const _keyUsername = 'username';
+  static const _keyRole = 'role';
+  static const _keyIsLoggedIn = 'is_logged_in';
 
-  static const String _keyUser = 'current_user';
-  static const String _keyToken = 'auth_token';
-  static const String _keyIsLoggedIn = 'is_logged_in';
-
-  SessionManager._internal();
-
-  factory SessionManager() {
-    _instance ??= SessionManager._internal();
-    return _instance!;
-  }
-
-  Future<SharedPreferences> get prefs async {
-    _prefs ??= await SharedPreferences.getInstance();
-    return _prefs!;
-  }
-
-  Future<void> init() async {
-    _prefs = await SharedPreferences.getInstance();
-  }
-
-  Future<void> saveUser(User user) async {
+  static Future<void> saveUser({
+    required String id,
+    required String username,
+    required String role,
+  }) async {
     try {
-      final p = await prefs;
-      final userData = jsonEncode(user.toMap());
-      await p.setString(_keyUser, userData);
-      await p.setBool(_keyIsLoggedIn, true);
+      await _storage.write(key: _keyUserId, value: id);
+      await _storage.write(key: _keyUsername, value: username);
+      await _storage.write(key: _keyRole, value: role);
+      await _storage.write(key: _keyIsLoggedIn, value: 'true');
     } catch (e) {
-      // فشل الحفظ - لا نرمي خطأ
+      // فشل صامت
     }
   }
 
-  User? getCurrentUser() {
+  static Future<Map<String, String?>> getUser() async {
     try {
-      final userData = _prefs?.getString(_keyUser);
-      if (userData == null || userData.isEmpty) return null;
-      final Map<String, dynamic> map = jsonDecode(userData);
-      return User.fromMap(map);
+      final id = await _storage.read(key: _keyUserId);
+      final username = await _storage.read(key: _keyUsername);
+      final role = await _storage.read(key: _keyRole);
+      return {'id': id, 'username': username, 'role': role};
     } catch (e) {
-      return null;
+      return {'id': null, 'username': null, 'role': null};
     }
   }
 
-  bool isLoggedIn() {
+  static Future<bool> isLoggedIn() async {
     try {
-      return _prefs?.getBool(_keyIsLoggedIn) ?? false;
+      final value = await _storage.read(key: _keyIsLoggedIn);
+      return value == 'true';
     } catch (e) {
       return false;
     }
   }
 
-  String? getToken() {
+  static Future<void> logout() async {
     try {
-      return _prefs?.getString(_keyToken);
+      await _storage.deleteAll();
     } catch (e) {
-      return null;
-    }
-  }
-
-  Future<void> saveToken(String token) async {
-    try {
-      final p = await prefs;
-      await p.setString(_keyToken, token);
-    } catch (e) {
-      // فشل الحفظ
-    }
-  }
-
-  String? getCurrentUserId() {
-    return getCurrentUser()?.id;
-  }
-
-  String? getCurrentUserRole() {
-    return getCurrentUser()?.roleId;
-  }
-
-  bool isAdmin() {
-    return getCurrentUser()?.roleId == 'role_admin';
-  }
-
-  Future<void> logout() async {
-    try {
-      final p = await prefs;
-      await p.remove(_keyUser);
-      await p.remove(_keyToken);
-      await p.setBool(_keyIsLoggedIn, false);
-    } catch (e) {
-      // فشل تسجيل الخروج
+      // فشل صامت
     }
   }
 }
