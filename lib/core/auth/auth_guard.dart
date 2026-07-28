@@ -13,25 +13,19 @@ class AuthGuard {
     'role_materials': ['/'],
   };
 
-  static bool canAccess(String? roleId, String route) {
-    if (roleId == null) return false;
-    final allowedRoutes = rolePermissions[roleId] ?? [];
-    return allowedRoutes.contains(route);
+  static Future<bool> canAccess(String route) async {
+    final isLoggedIn = await SessionManager.isLoggedIn();
+    if (!isLoggedIn) return false;
+    // في المستقبل: جلب دور المستخدم والتحقق من الصلاحيات
+    return true;
   }
 
-  static Widget guard(BuildContext context, Widget child) {
-    final session = SessionManager();
-    if (!session.isLoggedIn()) {
+  static Future<Widget> guard(BuildContext context, Widget child) async {
+    final isLoggedIn = await SessionManager.isLoggedIn();
+    if (!isLoggedIn) {
       return const LoginScreen();
     }
-    final user = session.getCurrentUser();
-    final currentRoute = ModalRoute.of(context)?.settings.name ?? '';
-    if (!canAccess(user?.roleId, currentRoute)) {
-      return Scaffold(
-        appBar: AppBar(title: const Text('غير مصرح')),
-        body: const Center(child: Text('ليس لديك صلاحية للوصول إلى هذه الصفحة')),
-      );
-    }
+    // في الوقت الحالي، جميع المسارات مفتوحة
     return child;
   }
 }
