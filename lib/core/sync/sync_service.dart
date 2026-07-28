@@ -14,7 +14,7 @@ class SyncService {
 
   Future<bool> hasInternet() async {
     final result = await Connectivity().checkConnectivity();
-    return result != ConnectivityResult.none;
+    return !result.contains(ConnectivityResult.none);
   }
 
   Future<void> addToQueue({
