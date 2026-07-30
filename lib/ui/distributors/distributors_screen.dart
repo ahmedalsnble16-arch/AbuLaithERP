@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
+import '../../config/theme.dart';
 import '../../core/database/database_helper.dart';
+import '../../core/constants/db_constants.dart';
 import '../../data/models/distributor.dart';
 import '../../data/repositories/distributor_repository.dart';
-import 'distributor_load_screen.dart';
-import 'distributor_settle_screen.dart';
+import 'distributor_account_screen.dart';
 
 class DistributorsScreen extends StatefulWidget {
   const DistributorsScreen({super.key});
@@ -16,7 +17,9 @@ class DistributorsScreen extends StatefulWidget {
 class _DistributorsScreenState extends State<DistributorsScreen> {
   final DistributorRepository _repo = DistributorRepository();
   List<Distributor> _distributors = [];
+  List<Distributor> _filtered = [];
   bool _isLoading = true;
+  final TextEditingController _searchController = TextEditingController();
 
   @override
   void initState() {
@@ -26,36 +29,58 @@ class _DistributorsScreenState extends State<DistributorsScreen> {
 
   Future<void> _load() async {
     setState(() => _isLoading = true);
-    _distributors = await _repo.getAll();
-    setState(() => _isLoading = false);
+    try {
+      final list = await _repo.getAll();
+      setState(() {
+        _distributors = list;
+        _filtered = list;
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() => _isLoading = false);
+    }
   }
 
-  Future<void> _add() async {
-    final nameController = TextEditingController();
-    final phoneController = TextEditingController();
-    final vehicleController = TextEditingController();
+  void _filter(String query) {
+    setState(() {
+      _filtered = _distributors
+          .where((d) => d.name.toLowerCase().contains(query.toLowerCase()))
+          .toList();
+    });
+  }
+
+  Future<void> _addDistributor() async {
+    final nameCtrl = TextEditingController();
+    final phoneCtrl = TextEditingController();
+    final vehicleCtrl = TextEditingController();
+    final commissionCtrl = TextEditingController(text: '5');
 
     final result = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('إضافة موزع'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(controller: nameController, decoration: const InputDecoration(labelText: 'الاسم')),
-            TextField(controller: phoneController, decoration: const InputDecoration(labelText: 'الهاتف')),
-            TextField(controller: vehicleController, decoration: const InputDecoration(labelText: 'السيارة')),
-          ],
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'اسم الموزع *')),
+              TextField(controller: phoneCtrl, decoration: const InputDecoration(labelText: 'رقم الهاتف')),
+              TextField(controller: vehicleCtrl, decoration: const InputDecoration(labelText: 'رقم السيارة')),
+              TextField(controller: commissionCtrl, decoration: const InputDecoration(labelText: 'نسبة الخصم %'), keyboardType: TextInputType.number),
+            ],
+          ),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء')),
           ElevatedButton(
             onPressed: () async {
+              if (nameCtrl.text.trim().isEmpty) return;
               final d = Distributor(
                 id: const Uuid().v4(),
-                name: nameController.text,
-                phone: phoneController.text,
-                vehicle: vehicleController.text,
+                name: nameCtrl.text.trim(),
+                phone: phoneCtrl.text.trim(),
+                vehicle: vehicleCtrl.text.trim(),
+                commissionPercent: double.tryParse(commissionCtrl.text) ?? 5,
                 createdAt: DatabaseHelper.now,
                 updatedAt: DatabaseHelper.now,
               );
@@ -74,37 +99,42 @@ class _DistributorsScreenState extends State<DistributorsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('الموزعون')),
-      floatingActionButton: FloatingActionButton(onPressed: _add, child: const Icon(Icons.add)),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : _distributors.isEmpty
-              ? const Center(child: Text('لا يوجد موزعون'))
-              : ListView.builder(
-                  itemCount: _distributors.length,
-                  itemBuilder: (context, index) {
-                    final d = _distributors[index];
-                    return Card(
-                      child: ListTile(
-                        leading: const CircleAvatar(backgroundColor: Colors.indigo, child: Icon(Icons.local_shipping, color: Colors.white)),
-                        title: Text(d.name),
-                        subtitle: Text(d.vehicle ?? ''),
-                        trailing: PopupMenuButton(
-                          itemBuilder: (ctx) => [
-                            const PopupMenuItem(value: 'load', child: Text('تحميل')),
-                            const PopupMenuItem(value: 'settle', child: Text('تصفية')),
-                          ],
-                          onSelected: (val) {
-                            if (val == 'load') {
-                              Navigator.push(context, MaterialPageRoute(builder: (_) => DistributorLoadScreen(distributorId: d.id, distributorName: d.name)));
-                            } else if (val == 'settle') {
-                              Navigator.push(context, MaterialPageRoute(builder: (_) => DistributorSettleScreen(distributorId: d.id, distributorName: d.name)));
-                            }
-                          },
-                        ),
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: TextField(
+              controller: _searchController,
+              decoration: const InputDecoration(hintText: 'بحث عن موزع...', prefixIcon: Icon(Icons.search)),
+              onChanged: _filter,
+            ),
+          ),
+          Expanded(
+            child: _isLoading
+                ? const Center(child: CircularProgressIndicator())
+                : _filtered.isEmpty
+                    ? const Center(child: Text('لا يوجد موزعون'))
+                    : ListView.builder(
+                        itemCount: _filtered.length,
+                        itemBuilder: (context, index) {
+                          final d = _filtered[index];
+                          return Card(
+                            child: ListTile(
+                              leading: const CircleAvatar(backgroundColor: Colors.indigo, child: Icon(Icons.local_shipping, color: Colors.white)),
+                              title: Text(d.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                              subtitle: Text('${d.vehicle ?? ""} | ${d.phone ?? ""}'),
+                              trailing: Text('${d.currentBalance} ر.ي', style: TextStyle(color: d.currentBalance > 0 ? AppTheme.errorColor : AppTheme.successColor, fontWeight: FontWeight.bold)),
+                              onTap: () {
+                                Navigator.push(context, MaterialPageRoute(builder: (_) => DistributorAccountScreen(distributor: d))).then((_) => _load());
+                              },
+                            ),
+                          );
+                        },
                       ),
-                    );
-                  },
-                ),
+          ),
+        ],
+      ),
+      floatingActionButton: FloatingActionButton(onPressed: _addDistributor, child: const Icon(Icons.add)),
     );
   }
 }
