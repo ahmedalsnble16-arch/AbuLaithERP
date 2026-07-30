@@ -18,15 +18,15 @@ class ReportsMenuScreen extends StatelessWidget {
         mainAxisSpacing: 12,
         childAspectRatio: 1.1,
         children: [
-          _buildCard(context, Icons.factory, 'تقرير الإنتاج', 'الإنتاج والتالف والفاقد', Colors.deepOrange, () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ProductionReportScreen()))),
-          _buildCard(context, Icons.compare_arrows, 'كشف المقارنة', 'مقارنة الإنتاج المتوقع والفعلي', AppTheme.primaryColor, () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ComparisonReportScreen()))),
-          _buildCard(context, Icons.account_balance, 'التقرير المالي', 'الخزنة والمصروفات والأرباح', Colors.green, () => Navigator.push(context, MaterialPageRoute(builder: (_) => const FinancialReportScreen()))),
+          _buildCard(context, Icons.factory, 'تقرير الإنتاج', Colors.deepOrange, () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ProductionReportScreen()))),
+          _buildCard(context, Icons.compare_arrows, 'كشف المقارنة', AppTheme.primaryColor, () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ComparisonReportScreen()))),
+          _buildCard(context, Icons.account_balance, 'التقرير المالي', Colors.green, () => Navigator.push(context, MaterialPageRoute(builder: (_) => const FinancialReportScreen()))),
         ],
       ),
     );
   }
 
-  Widget _buildCard(BuildContext context, IconData icon, String title, String subtitle, Color color, VoidCallback onTap) {
+  Widget _buildCard(BuildContext context, IconData icon, String title, Color color, VoidCallback onTap) {
     return Card(
       elevation: 1.5,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -41,8 +41,6 @@ class ReportsMenuScreen extends StatelessWidget {
               CircleAvatar(radius: 28, backgroundColor: color.withAlpha(30), child: Icon(icon, color: color, size: 28)),
               const SizedBox(height: 8),
               Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14), textAlign: TextAlign.center),
-              const SizedBox(height: 4),
-              Text(subtitle, style: TextStyle(fontSize: 10, color: Colors.grey.shade600), textAlign: TextAlign.center),
             ],
           ),
         ),
