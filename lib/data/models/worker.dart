@@ -4,6 +4,7 @@ class Worker {
   final String? job;
   final String? phone;
   final double salary;
+  final double dailySalary;
   final String? hireDate;
   final bool active;
   final String createdAt;
@@ -19,6 +20,7 @@ class Worker {
     this.job,
     this.phone,
     this.salary = 0,
+    this.dailySalary = 0,
     this.hireDate,
     this.active = true,
     required this.createdAt,
@@ -36,6 +38,7 @@ class Worker {
       job: map['job'],
       phone: map['phone'],
       salary: (map['salary'] ?? 0).toDouble(),
+      dailySalary: (map['daily_salary'] ?? map['salary'] ?? 0).toDouble(),
       hireDate: map['hire_date'],
       active: map['active'] == 1,
       createdAt: map['created_at'] ?? '',
@@ -54,6 +57,7 @@ class Worker {
       'job': job,
       'phone': phone,
       'salary': salary,
+      'daily_salary': dailySalary,
       'hire_date': hireDate,
       'active': active ? 1 : 0,
       'created_at': createdAt,
@@ -63,5 +67,33 @@ class Worker {
       'sync_status': syncStatus ?? 'Pending',
       'deleted': deleted ? 1 : 0,
     };
+  }
+
+  Worker copyWith({
+    String? id,
+    String? name,
+    String? job,
+    String? phone,
+    double? salary,
+    double? dailySalary,
+    String? hireDate,
+    bool? active,
+  }) {
+    return Worker(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      job: job ?? this.job,
+      phone: phone ?? this.phone,
+      salary: salary ?? this.salary,
+      dailySalary: dailySalary ?? this.dailySalary,
+      hireDate: hireDate ?? this.hireDate,
+      active: active ?? this.active,
+      createdAt: createdAt,
+      updatedAt: DateTime.now().toIso8601String(),
+      createdBy: createdBy,
+      deviceId: deviceId,
+      syncStatus: syncStatus,
+      deleted: deleted,
+    );
   }
 }
