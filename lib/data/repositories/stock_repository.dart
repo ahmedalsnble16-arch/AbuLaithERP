@@ -55,6 +55,21 @@ class StockRepository {
         where: 'product_id = ?',
         whereArgs: [productId],
       );
+    } else {
+      // إنشاء سجل مخزون جديد إذا لم يكن موجوداً
+      await db.insert(
+        DBConstants.tableStock,
+        {
+          'id': DateTime.now().millisecondsSinceEpoch.toString(),
+          'product_id': productId,
+          'quantity_pieces': quantity,
+          'reserved_quantity': 0,
+          'average_cost': 0,
+          'last_update': DateTime.now().toIso8601String(),
+          'created_at': DateTime.now().toIso8601String(),
+          'updated_at': DateTime.now().toIso8601String(),
+        },
+      );
     }
   }
 
