@@ -27,7 +27,6 @@ class _ProductionComparisonScreenState extends State<ProductionComparisonScreen>
   bool _isLoading = true;
   String _selectedDate = DateTime.now().toIso8601String().substring(0, 10);
   String _batchNumber = '';
-  String _productionManager = '';
   bool _comparisonCalculated = false;
   bool _batchApproved = false;
 
@@ -89,10 +88,6 @@ class _ProductionComparisonScreenState extends State<ProductionComparisonScreen>
 
   int _damagedPieces(String productId) {
     return int.tryParse(_damagedCtrl[productId]?.text ?? '0') ?? 0;
-  }
-
-  int _totalActualOut(String productId) {
-    return _actualGoodPieces(productId) + _damagedPieces(productId);
   }
 
   int _requiredPiecesTotal(String productId) {
@@ -172,7 +167,7 @@ class _ProductionComparisonScreenState extends State<ProductionComparisonScreen>
                             children: [
                               Expanded(child: TextField(decoration: const InputDecoration(labelText: 'التاريخ', hintText: 'YYYY-MM-DD'), controller: TextEditingController(text: _selectedDate), onChanged: (v) => _selectedDate = v)),
                               const SizedBox(width: 12),
-                              Expanded(child: TextField(decoration: const InputDecoration(labelText: 'مسؤول الإنتاج'), onChanged: (v) => _productionManager = v)),
+                              const Expanded(child: TextField(decoration: InputDecoration(labelText: 'مسؤول الإنتاج'))),
                             ],
                           ),
                         ],
@@ -333,7 +328,6 @@ class _ProductionComparisonScreenState extends State<ProductionComparisonScreen>
             final id = p['id'] as String;
             final boxSize = _boxSize(id);
             final good = _actualGoodPieces(id);
-            final damaged = _damagedPieces(id);
             return DataRow(cells: [
               DataCell(Text(p['name'] ?? '')),
               DataCell(Text('$boxSize')),
