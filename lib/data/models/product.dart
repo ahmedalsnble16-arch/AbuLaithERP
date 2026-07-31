@@ -47,7 +47,7 @@ class Product {
     return Product(
       id: map['id'] ?? '',
       barcode: map['barcode'],
-      code: map['code'],
+      code: map['code'], // يقبل null أو قيمة نصية
       name: map['name'] ?? '',
       categoryId: map['category_id'],
       unit: map['unit'] ?? 'قطعة',
@@ -72,7 +72,8 @@ class Product {
     return {
       'id': id,
       'barcode': barcode,
-      'code': code,
+      // إذا كان الكود فارغًا أو null، أرسل null إلى قاعدة البيانات
+      'code': (code != null && code!.trim().isNotEmpty) ? code!.trim() : null,
       'name': name,
       'category_id': categoryId,
       'unit': unit,
@@ -91,5 +92,38 @@ class Product {
       'sync_status': syncStatus ?? 'Pending',
       'deleted': deleted ? 1 : 0,
     };
+  }
+
+  Product copyWith({
+    String? id,
+    String? name,
+    double? retailPrice,
+    double? wholesalePrice,
+    bool? active,
+    String? code,
+    String? barcode,
+  }) {
+    return Product(
+      id: id ?? this.id,
+      barcode: barcode ?? this.barcode,
+      code: code ?? this.code,
+      name: name ?? this.name,
+      categoryId: categoryId,
+      unit: unit,
+      piecesPerBox: piecesPerBox,
+      wholesalePrice: wholesalePrice ?? this.wholesalePrice,
+      retailPrice: retailPrice ?? this.retailPrice,
+      productionCost: productionCost,
+      minimumStock: minimumStock,
+      image: image,
+      active: active ?? this.active,
+      notes: notes,
+      createdAt: createdAt,
+      updatedAt: DateTime.now().toIso8601String(),
+      createdBy: createdBy,
+      deviceId: deviceId,
+      syncStatus: syncStatus,
+      deleted: deleted,
+    );
   }
 }
