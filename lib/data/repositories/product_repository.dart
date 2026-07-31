@@ -32,15 +32,28 @@ class ProductRepository {
     final db = await _dbHelper.database;
     final id = product.id.isNotEmpty ? product.id : _uuid.v4();
     final data = product.toMap()..['id'] = id;
+    
+    // إذا كان الكود null، نحذف المفتاح من الخريطة لتفادي تعارض UNIQUE
+    if (data['code'] == null) {
+      data.remove('code');
+    }
+    
     await db.insert(DBConstants.tableProducts, data);
     return id;
   }
 
   Future<void> update(Product product) async {
     final db = await _dbHelper.database;
+    final data = product.toMap();
+    
+    // نفس المعالجة عند التحديث
+    if (data['code'] == null) {
+      data.remove('code');
+    }
+    
     await db.update(
       DBConstants.tableProducts,
-      product.toMap(),
+      data,
       where: 'id = ?',
       whereArgs: [product.id],
     );
