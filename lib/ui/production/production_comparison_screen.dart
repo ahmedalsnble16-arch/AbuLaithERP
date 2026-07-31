@@ -16,18 +16,22 @@ class _ProductionComparisonScreenState extends State<ProductionComparisonScreen>
   List<Map<String, dynamic>> _products = [];
 
   // متحكمات الإنتاج الفعلي
-  Map<String, TextEditingController> _actualBoxesCtrl = {};
-  Map<String, TextEditingController> _actualPiecesCtrl = {};
-  Map<String, TextEditingController> _damagedCtrl = {};
+  final Map<String, TextEditingController> _actualBoxesCtrl = {};
+  final Map<String, TextEditingController> _actualPiecesCtrl = {};
+  final Map<String, TextEditingController> _damagedCtrl = {};
 
-  // متحكمات الإنتاج المطلوب
-  Map<String, TextEditingController> _phasesCtrl = {};
-  Map<String, TextEditingController> _piecesPerPhaseCtrl = {};
+  // متحكمات الإنتاج المطلوب (الأطوار والقطع/طور)
+  final Map<String, TextEditingController> _phasesCtrl = {};
+  final Map<String, TextEditingController> _piecesPerPhaseCtrl = {};
 
   bool _isLoading = true;
   String _selectedDate = DateTime.now().toIso8601String().substring(0, 10);
+  String _batchNumber = '';
+  String _productionManager = '';
+  bool _comparisonCalculated = false;
+  bool _batchApproved = false;
 
-  // بيانات تاريخية تجريبية (ستستبدل بقاعدة البيانات لاحقاً)
+  // بيانات تاريخية (تُستبدل بقاعدة البيانات لاحقاً)
   final List<Map<String, dynamic>> _historicalBatches = [
     {'date': '27/07', 'batch': 'B-0012', 'required': 8000, 'actual': 7960, 'lost': 40, 'damaged': 12, 'increase': 0},
     {'date': '28/07', 'batch': 'B-0015', 'required': 7800, 'actual': 7620, 'lost': 180, 'damaged': 35, 'increase': 0},
@@ -39,6 +43,7 @@ class _ProductionComparisonScreenState extends State<ProductionComparisonScreen>
   @override
   void initState() {
     super.initState();
+    _batchNumber = 'B-${DateTime.now().millisecondsSinceEpoch.toString().substring(5)}';
     _loadProducts();
   }
 
@@ -76,10 +81,18 @@ class _ProductionComparisonScreenState extends State<ProductionComparisonScreen>
     return product['pieces_per_box'] as int? ?? 60;
   }
 
-  int _actualPiecesTotal(String productId) {
+  int _actualGoodPieces(String productId) {
     final boxes = int.tryParse(_actualBoxesCtrl[productId]?.text ?? '0') ?? 0;
     final pieces = int.tryParse(_actualPiecesCtrl[productId]?.text ?? '0') ?? 0;
     return (boxes * _boxSize(productId)) + pieces;
+  }
+
+  int _damagedPieces(String productId) {
+    return int.tryParse(_damagedCtrl[productId]?.text ?? '0') ?? 0;
+  }
+
+  int _totalActualOut(String productId) {
+    return _actualGoodPieces(productId) + _damagedPieces(productId);
   }
 
   int _requiredPiecesTotal(String productId) {
@@ -89,38 +102,51 @@ class _ProductionComparisonScreenState extends State<ProductionComparisonScreen>
   }
 
   String _piecesToDisplay(int pieces, int boxSize) {
+    if (boxSize <= 0) return '$pieces';
     final boxes = pieces ~/ boxSize;
     final remaining = pieces % boxSize;
     return '$boxes.$remaining';
   }
 
-  int _damaged(String productId) {
-    return int.tryParse(_damagedCtrl[productId]?.text ?? '0') ?? 0;
-  }
-
   // ============ مؤشرات الأداء ============
   int get _totalRequired => _products.fold(0, (sum, p) => sum + _requiredPiecesTotal(p['id']));
-  int get _totalActual => _products.fold(0, (sum, p) => sum + _actualPiecesTotal(p['id']));
+  int get _totalActualGood => _products.fold(0, (sum, p) => sum + _actualGoodPieces(p['id']));
+  int get _totalDamaged => _products.fold(0, (sum, p) => sum + _damagedPieces(p['id']));
   int get _totalLost {
     int lost = 0;
     for (var p in _products) {
-      final diff = _actualPiecesTotal(p['id']) - _requiredPiecesTotal(p['id']);
+      final diff = _actualGoodPieces(p['id']) - _requiredPiecesTotal(p['id']);
       if (diff < 0) lost += diff.abs();
     }
     return lost;
   }
-  int get _totalDamaged => _products.fold(0, (sum, p) => sum + _damaged(p['id']));
   int get _totalIncrease {
     int inc = 0;
     for (var p in _products) {
-      final diff = _actualPiecesTotal(p['id']) - _requiredPiecesTotal(p['id']);
+      final diff = _actualGoodPieces(p['id']) - _requiredPiecesTotal(p['id']);
       if (diff > 0) inc += diff;
     }
     return inc;
   }
   double get _avgMatch {
     if (_totalRequired == 0) return 0;
-    return (_totalActual / _totalRequired) * 100;
+    return (_totalActualGood / _totalRequired) * 100;
+  }
+
+  void _calculateComparison() {
+    setState(() {
+      _comparisonCalculated = true;
+      _batchApproved = false;
+    });
+  }
+
+  void _approveBatch() {
+    setState(() {
+      _batchApproved = true;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('✅ تم اعتماد الضربة وتثبيت النتائج'), backgroundColor: AppTheme.successColor),
+    );
   }
 
   @override
@@ -134,38 +160,44 @@ class _ProductionComparisonScreenState extends State<ProductionComparisonScreen>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // فلاتر
-                  _buildFilters(),
+                  // رأس الكشف
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Column(
+                        children: [
+                          Text('مقارنة الضربة رقم: $_batchNumber', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              Expanded(child: TextField(decoration: const InputDecoration(labelText: 'التاريخ', hintText: 'YYYY-MM-DD'), controller: TextEditingController(text: _selectedDate), onChanged: (v) => _selectedDate = v)),
+                              const SizedBox(width: 12),
+                              Expanded(child: TextField(decoration: const InputDecoration(labelText: 'مسؤول الإنتاج'), onChanged: (v) => _productionManager = v)),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
                   const SizedBox(height: 12),
+
                   // مؤشرات الأداء
                   _buildKPIs(),
                   const SizedBox(height: 12),
+
                   // أعلى وأقل ضربة
                   _buildBestWorst(),
                   const SizedBox(height: 16),
-                  // كشف المقارنة الحالي
+
+                  // كشف المقارنة
                   _buildCurrentComparison(),
                   const SizedBox(height: 16),
-                  // جدول تاريخي ورسوم بيانية
+
+                  // تحليل تاريخي
                   _buildHistoricalSection(),
                 ],
               ),
             ),
-    );
-  }
-
-  // ============ فلاتر ============
-  Widget _buildFilters() {
-    return Row(
-      children: [
-        const Text('من: '),
-        SizedBox(width: 120, child: TextField(decoration: const InputDecoration(hintText: 'YYYY-MM-DD'), controller: TextEditingController(text: _selectedDate), onChanged: (v) => setState(() => _selectedDate = v))),
-        const SizedBox(width: 8),
-        const Text('إلى: '),
-        SizedBox(width: 120, child: TextField(decoration: const InputDecoration(hintText: 'YYYY-MM-DD'), controller: TextEditingController(text: _selectedDate))),
-        const SizedBox(width: 16),
-        ElevatedButton(onPressed: () => setState(() {}), child: const Text('🔍 بحث')),
-      ],
     );
   }
 
@@ -177,7 +209,7 @@ class _ProductionComparisonScreenState extends State<ProductionComparisonScreen>
       children: [
         _kpiCard('إجمالي الضربات', '${_historicalBatches.length}', AppTheme.primaryColor),
         _kpiCard('إجمالي المطلوب', '${_totalRequired}', AppTheme.textPrimaryColor),
-        _kpiCard('إجمالي الفعلي', '${_totalActual}', AppTheme.textPrimaryColor),
+        _kpiCard('إجمالي الفعلي السليم', '${_totalActualGood}', AppTheme.textPrimaryColor),
         _kpiCard('إجمالي الفاقد', '${_totalLost}', AppTheme.errorColor),
         _kpiCard('إجمالي التالف', '${_totalDamaged}', AppTheme.warningColor),
         _kpiCard('متوسط المطابقة', '${_avgMatch.toStringAsFixed(2)}%', AppTheme.successColor),
@@ -202,6 +234,7 @@ class _ProductionComparisonScreenState extends State<ProductionComparisonScreen>
 
   // ============ أعلى وأقل ضربة ============
   Widget _buildBestWorst() {
+    if (_historicalBatches.isEmpty) return const SizedBox.shrink();
     final best = _historicalBatches.reduce((a, b) => (a['actual'] / a['required']) > (b['actual'] / b['required']) ? a : b);
     final worst = _historicalBatches.reduce((a, b) => (a['actual'] / a['required']) < (b['actual'] / b['required']) ? a : b);
     return Row(
@@ -239,7 +272,7 @@ class _ProductionComparisonScreenState extends State<ProductionComparisonScreen>
     );
   }
 
-  // ============ كشف المقارنة الحالي ============
+  // ============ كشف المقارنة ============
   Widget _buildCurrentComparison() {
     return Card(
       child: Padding(
@@ -247,8 +280,6 @@ class _ProductionComparisonScreenState extends State<ProductionComparisonScreen>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('📋 كشف مقارنة الضربة الحالية', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 12),
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -258,13 +289,23 @@ class _ProductionComparisonScreenState extends State<ProductionComparisonScreen>
               ],
             ),
             const SizedBox(height: 16),
-            _buildResultTable(),
+            if (_comparisonCalculated) _buildResultTable(),
             const SizedBox(height: 12),
             Row(
               children: [
-                ElevatedButton(onPressed: () => setState(() {}), child: const Text('🔄 تحديث الحسابات')),
+                ElevatedButton.icon(
+                  onPressed: _calculateComparison,
+                  icon: const Icon(Icons.calculate),
+                  label: const Text('حساب المقارنة'),
+                ),
                 const SizedBox(width: 8),
-                ElevatedButton(onPressed: () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('✅ تم اعتماد الضربة!'))), child: const Text('✓ اعتماد الضربة')),
+                if (_comparisonCalculated && !_batchApproved)
+                  ElevatedButton.icon(
+                    onPressed: _approveBatch,
+                    icon: const Icon(Icons.check_circle),
+                    label: const Text('اعتماد الضربة'),
+                    style: ElevatedButton.styleFrom(backgroundColor: AppTheme.successColor),
+                  ),
               ],
             ),
           ],
@@ -277,28 +318,29 @@ class _ProductionComparisonScreenState extends State<ProductionComparisonScreen>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('📤 الإنتاج الفعلي', style: TextStyle(fontWeight: FontWeight.bold)),
+        const Text('📤 الإنتاج الفعلي', style: TextStyle(fontWeight: FontWeight.bold, color: AppTheme.primaryColor)),
         const SizedBox(height: 8),
         SingleChildScrollView(scrollDirection: Axis.horizontal, child: DataTable(
           columns: const [
             DataColumn(label: Text('المنتج')),
             DataColumn(label: Text('سلة')),
             DataColumn(label: Text('سلال')),
-            DataColumn(label: Text('قطع')),
+            DataColumn(label: Text('قطع إضافية')),
             DataColumn(label: Text('تالف')),
             DataColumn(label: Text('سليم')),
           ],
           rows: _products.map((p) {
             final id = p['id'] as String;
             final boxSize = _boxSize(id);
-            final total = _actualPiecesTotal(id);
+            final good = _actualGoodPieces(id);
+            final damaged = _damagedPieces(id);
             return DataRow(cells: [
               DataCell(Text(p['name'] ?? '')),
               DataCell(Text('$boxSize')),
-              DataCell(SizedBox(width: 50, child: TextField(controller: _actualBoxesCtrl[id], keyboardType: TextInputType.number, onChanged: (_) => setState(() {})))),
-              DataCell(SizedBox(width: 50, child: TextField(controller: _actualPiecesCtrl[id], keyboardType: TextInputType.number, onChanged: (_) => setState(() {})))),
-              DataCell(SizedBox(width: 50, child: TextField(controller: _damagedCtrl[id], keyboardType: TextInputType.number, onChanged: (_) => setState(() {})))),
-              DataCell(Text('$total', style: const TextStyle(fontWeight: FontWeight.bold))),
+              DataCell(SizedBox(width: 50, child: TextField(controller: _actualBoxesCtrl[id], keyboardType: TextInputType.number, onChanged: (_) => setState(() => _comparisonCalculated = false)))),
+              DataCell(SizedBox(width: 60, child: TextField(controller: _actualPiecesCtrl[id], keyboardType: TextInputType.number, onChanged: (_) => setState(() => _comparisonCalculated = false)))),
+              DataCell(SizedBox(width: 50, child: TextField(controller: _damagedCtrl[id], keyboardType: TextInputType.number, onChanged: (_) => setState(() => _comparisonCalculated = false)))),
+              DataCell(Text('$good', style: const TextStyle(fontWeight: FontWeight.bold))),
             ]);
           }).toList(),
         )),
@@ -310,26 +352,27 @@ class _ProductionComparisonScreenState extends State<ProductionComparisonScreen>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('📥 الإنتاج المطلوب', style: TextStyle(fontWeight: FontWeight.bold)),
+        const Text('📥 الإنتاج المطلوب', style: TextStyle(fontWeight: FontWeight.bold, color: AppTheme.primaryColor)),
         const SizedBox(height: 8),
         SingleChildScrollView(scrollDirection: Axis.horizontal, child: DataTable(
           columns: const [
             DataColumn(label: Text('المنتج')),
             DataColumn(label: Text('أطوار')),
             DataColumn(label: Text('قطع/طور')),
-            DataColumn(label: Text('المطلوب')),
-            DataColumn(label: Text('سلال+قطع')),
+            DataColumn(label: Text('المطلوب (قطع)')),
+            DataColumn(label: Text('سلال مطلوبة')),
           ],
           rows: _products.map((p) {
             final id = p['id'] as String;
             final boxSize = _boxSize(id);
             final required = _requiredPiecesTotal(id);
+            final reqDisplay = _piecesToDisplay(required, boxSize);
             return DataRow(cells: [
               DataCell(Text(p['name'] ?? '')),
-              DataCell(SizedBox(width: 50, child: TextField(controller: _phasesCtrl[id], keyboardType: TextInputType.number, onChanged: (_) => setState(() {})))),
-              DataCell(SizedBox(width: 50, child: TextField(controller: _piecesPerPhaseCtrl[id], keyboardType: TextInputType.number, onChanged: (_) => setState(() {})))),
+              DataCell(SizedBox(width: 50, child: TextField(controller: _phasesCtrl[id], keyboardType: TextInputType.number, onChanged: (_) => setState(() => _comparisonCalculated = false)))),
+              DataCell(SizedBox(width: 50, child: TextField(controller: _piecesPerPhaseCtrl[id], keyboardType: TextInputType.number, onChanged: (_) => setState(() => _comparisonCalculated = false)))),
               DataCell(Text('$required', style: const TextStyle(fontWeight: FontWeight.bold))),
-              DataCell(Text(_piecesToDisplay(required, boxSize))),
+              DataCell(Text(reqDisplay)),
             ]);
           }).toList(),
         )),
@@ -341,7 +384,8 @@ class _ProductionComparisonScreenState extends State<ProductionComparisonScreen>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('📊 نتيجة المقارنة', style: TextStyle(fontWeight: FontWeight.bold)),
+        const Divider(),
+        const Text('📊 نتيجة المقارنة', style: TextStyle(fontWeight: FontWeight.bold, color: AppTheme.primaryColor)),
         const SizedBox(height: 8),
         SingleChildScrollView(scrollDirection: Axis.horizontal, child: DataTable(
           columns: const [
@@ -354,7 +398,7 @@ class _ProductionComparisonScreenState extends State<ProductionComparisonScreen>
           rows: _products.map((p) {
             final id = p['id'] as String;
             final boxSize = _boxSize(id);
-            final actual = _actualPiecesTotal(id);
+            final actual = _actualGoodPieces(id);
             final required = _requiredPiecesTotal(id);
             final diff = actual - required;
             String status; Color color;
@@ -371,12 +415,12 @@ class _ProductionComparisonScreenState extends State<ProductionComparisonScreen>
           }).toList(),
         )),
         const SizedBox(height: 8),
-        Text('الإجمالي: المطلوب $_totalRequired | الفعلي $_totalActual | الفاقد $_totalLost | التالف $_totalDamaged | الزيادة $_totalIncrease'),
+        Text('إجمالي المطلوب: $_totalRequired قطعة | إجمالي الفعلي السليم: $_totalActualGood قطعة | الفاقد: $_totalLost | التالف: $_totalDamaged | الزيادة: $_totalIncrease'),
       ],
     );
   }
 
-  // ============ جدول تاريخي ورسوم بيانية ============
+  // ============ تحليل تاريخي ============
   Widget _buildHistoricalSection() {
     return Card(
       child: Padding(
