@@ -1,18 +1,17 @@
+```dart
+import 'package:sqflite/sqflite.dart';
 import '../../core/constants/db_constants.dart';
 import '../../core/database/database_helper.dart';
-import '../models/settings.dart';
 
 class SettingsRepository {
   final DatabaseHelper _db = DatabaseHelper();
 
-  // جلب جميع الإعدادات كـ Map
   Future<Map<String, String>> getAll() async {
     final database = await _db.database;
     final maps = await database.query(DBConstants.tableSettings);
     return {for (var m in maps) m['key'] as String: m['value'] as String};
   }
 
-  // جلب إعداد واحد
   Future<String?> get(String key) async {
     final database = await _db.database;
     final maps = await database.query(
@@ -24,7 +23,6 @@ class SettingsRepository {
     return maps.first['value'] as String?;
   }
 
-  // حفظ إعداد واحد
   Future<void> set(String key, String value) async {
     final database = await _db.database;
     await database.insert(
@@ -38,7 +36,6 @@ class SettingsRepository {
     );
   }
 
-  // حفظ عدة إعدادات دفعة واحدة
   Future<void> setAll(Map<String, String> settings) async {
     final database = await _db.database;
     final batch = database.batch();
@@ -56,7 +53,6 @@ class SettingsRepository {
     await batch.commit(noResult: true);
   }
 
-  // إعادة إعداد افتراضي
   Future<void> reset(String key) async {
     final defaults = {
       'company_name': 'معمل أبو ليث',
@@ -77,3 +73,4 @@ class SettingsRepository {
     }
   }
 }
+```
