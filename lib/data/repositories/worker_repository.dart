@@ -44,4 +44,14 @@ class WorkerRepository {
       whereArgs: [id],
     );
   }
+
+  Future<void> toggleActive(String id, bool active) async {
+    final db = await _dbHelper.database;
+    await db.update(
+      DBConstants.tableWorkers,
+      {'active': active ? 1 : 0, 'updated_at': DateTime.now().toIso8601String()},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
 }
