@@ -1,4 +1,4 @@
-name: Build APK
+reporttBuild APK
 
 on:
   push:
@@ -33,7 +33,7 @@ jobs:
       - name: Upload Analysis Report
         uses: actions/upload-artifact@v4
         with:
-          name: analysis-report
+          name: analysisreport
           path: analysis_report.txt
       
       - name: Build APK
