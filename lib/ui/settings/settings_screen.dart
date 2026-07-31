@@ -4,7 +4,6 @@ import '../../config/theme.dart';
 import '../../core/constants/db_constants.dart';
 import '../../core/database/database_helper.dart';
 import '../../data/repositories/settings_repository.dart';
-import '../../data/models/user.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -19,7 +18,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _isLoading = true;
   bool _isSaving = false;
 
-  // متحكمات الحقول الأساسية (من المرحلة الأولى)
+  // متحكمات الحقول الأساسية
   final _companyNameCtrl = TextEditingController();
   final _currencyCtrl = TextEditingController();
   final _boxSizeCtrl = TextEditingController();
@@ -30,8 +29,35 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _showroomEnabled = true;
   bool _distributorsEnabled = true;
   bool _barcodeEnabled = false;
-  bool _taxEnabled = false;
   bool _darkMode = false;
+
+  // العملة والضرائب
+  final _currencySymbolCtrl = TextEditingController();
+  final _decimalPlacesCtrl = TextEditingController(text: '0');
+  bool _taxEnabled = false;
+  final _taxNameCtrl = TextEditingController();
+  final _taxRateCtrl = TextEditingController();
+  bool _taxIncluded = false;
+  bool _showTaxInInvoice = true;
+
+  // المزامنة
+  bool _autoSync = false;
+  final _syncIntervalCtrl = TextEditingController(text: '5');
+  bool _syncOnWifiOnly = true;
+
+  // التقارير
+  bool _showLogoOnReport = true;
+  bool _showDateOnReport = true;
+  bool _showUserOnReport = false;
+  bool _showSignature = false;
+  final _reportFooterCtrl = TextEditingController();
+
+  // الإشعارات
+  bool _notifyLowStock = true;
+  bool _notifyDebts = true;
+  bool _notifyExpenses = true;
+  bool _notifyProduction = false;
+  bool _notifySyncFail = true;
 
   // بيانات إضافية
   int _usersCount = 0;
@@ -67,30 +93,46 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _showroomEnabled = settings['showroom_enabled'] != 'false';
     _distributorsEnabled = settings['distributors_enabled'] != 'false';
     _barcodeEnabled = settings['barcode_enabled'] == 'true';
-    _taxEnabled = settings['tax_enabled'] == 'true';
     _darkMode = settings['dark_mode'] == 'true';
+
+    _taxEnabled = settings['tax_enabled'] == 'true';
+    _taxNameCtrl.text = settings['tax_name'] ?? 'ضريبة';
+    _taxRateCtrl.text = settings['tax_rate'] ?? '0';
+    _taxIncluded = settings['tax_included'] == 'true';
+    _showTaxInInvoice = settings['show_tax_in_invoice'] != 'false';
+    _currencySymbolCtrl.text = settings['currency_symbol'] ?? 'ر.ي';
+    _decimalPlacesCtrl.text = settings['decimal_places'] ?? '0';
+    _autoSync = settings['auto_sync'] == 'true';
+    _syncIntervalCtrl.text = settings['sync_interval'] ?? '5';
+    _syncOnWifiOnly = settings['sync_on_wifi_only'] != 'false';
+    _showLogoOnReport = settings['show_logo_on_report'] != 'false';
+    _showDateOnReport = settings['show_date_on_report'] != 'false';
+    _showUserOnReport = settings['show_user_on_report'] == 'true';
+    _showSignature = settings['show_signature'] == 'true';
+    _reportFooterCtrl.text = settings['report_footer'] ?? '';
+    _notifyLowStock = settings['notify_low_stock'] != 'false';
+    _notifyDebts = settings['notify_debts'] != 'false';
+    _notifyExpenses = settings['notify_expenses'] != 'false';
+    _notifyProduction = settings['notify_production'] == 'true';
+    _notifySyncFail = settings['notify_sync_fail'] != 'false';
   }
 
   Future<void> _loadSystemInfo() async {
     final db = await DatabaseHelper().database;
     _dbName = AppConfig.dbName;
     
-    // عدد المستخدمين
     final users = await db.rawQuery('SELECT COUNT(*) as count FROM ${DBConstants.tableUsers} WHERE deleted = 0');
     _usersCount = (users.first['count'] as num?)?.toInt() ?? 0;
 
-    // عدد الجداول
     final tables = await db.rawQuery("SELECT count(*) as count FROM sqlite_master WHERE type='table'");
     _tablesCount = (tables.first['count'] as num?)?.toInt() ?? 0;
 
-    // آخر نسخة احتياطية
     final backups = await db.query(DBConstants.tableBackupHistory, orderBy: 'created_at DESC', limit: 1);
     if (backups.isNotEmpty) {
       _lastBackup = backups.first['created_at']?.toString().substring(0, 16) ?? 'لا يوجد';
     }
 
-    // عدد السجلات (تقريبي)
-    _recordsCount = _usersCount * 10; // تقريبي
+    _recordsCount = _usersCount * 10;
   }
 
   Future<void> _saveAll() async {
@@ -107,8 +149,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
         'showroom_enabled': _showroomEnabled.toString(),
         'distributors_enabled': _distributorsEnabled.toString(),
         'barcode_enabled': _barcodeEnabled.toString(),
-        'tax_enabled': _taxEnabled.toString(),
         'dark_mode': _darkMode.toString(),
+        'currency_symbol': _currencySymbolCtrl.text.trim(),
+        'decimal_places': _decimalPlacesCtrl.text.trim(),
+        'tax_enabled': _taxEnabled.toString(),
+        'tax_name': _taxNameCtrl.text.trim(),
+        'tax_rate': _taxRateCtrl.text.trim(),
+        'tax_included': _taxIncluded.toString(),
+        'show_tax_in_invoice': _showTaxInInvoice.toString(),
+        'auto_sync': _autoSync.toString(),
+        'sync_interval': _syncIntervalCtrl.text.trim(),
+        'sync_on_wifi_only': _syncOnWifiOnly.toString(),
+        'show_logo_on_report': _showLogoOnReport.toString(),
+        'show_date_on_report': _showDateOnReport.toString(),
+        'show_user_on_report': _showUserOnReport.toString(),
+        'show_signature': _showSignature.toString(),
+        'report_footer': _reportFooterCtrl.text.trim(),
+        'notify_low_stock': _notifyLowStock.toString(),
+        'notify_debts': _notifyDebts.toString(),
+        'notify_expenses': _notifyExpenses.toString(),
+        'notify_production': _notifyProduction.toString(),
+        'notify_sync_fail': _notifySyncFail.toString(),
       });
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -144,6 +205,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
         'low_stock_threshold': '100', 'session_timeout': '30', 'negative_stock': 'false',
         'production_enabled': 'true', 'showroom_enabled': 'true', 'distributors_enabled': 'true',
         'barcode_enabled': 'false', 'tax_enabled': 'false', 'dark_mode': 'false',
+        'currency_symbol': 'ر.ي', 'decimal_places': '0',
+        'tax_name': 'ضريبة', 'tax_rate': '0', 'tax_included': 'false', 'show_tax_in_invoice': 'true',
+        'auto_sync': 'false', 'sync_interval': '5', 'sync_on_wifi_only': 'true',
+        'show_logo_on_report': 'true', 'show_date_on_report': 'true', 'show_user_on_report': 'false',
+        'show_signature': 'false', 'report_footer': '',
+        'notify_low_stock': 'true', 'notify_debts': 'true', 'notify_expenses': 'true',
+        'notify_production': 'false', 'notify_sync_fail': 'true',
       };
       await _repo.setAll(defaults);
       _loadAll();
@@ -187,7 +255,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
     if (confirmed == true) {
       final db = await DatabaseHelper().database;
-      // حذف منطقي لجميع السجلات
       final tables = [DBConstants.tableSales, DBConstants.tableProductionBatches, DBConstants.tablePurchases, DBConstants.tableStockMovements, DBConstants.tableTreasury, DBConstants.tableExpenses, DBConstants.tableInventoryCounts, DBConstants.tableSyncQueue];
       for (var table in tables) {
         await db.delete(table);
@@ -197,10 +264,57 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  Future<void> _changePasswordDialog() async {
+    final oldPassCtrl = TextEditingController();
+    final newPassCtrl = TextEditingController();
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('تغيير كلمة المرور'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(controller: oldPassCtrl, obscureText: true, decoration: const InputDecoration(labelText: 'كلمة المرور الحالية')),
+            const SizedBox(height: 12),
+            TextField(controller: newPassCtrl, obscureText: true, decoration: const InputDecoration(labelText: 'كلمة المرور الجديدة')),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء')),
+          ElevatedButton(
+            onPressed: () async {
+              if (oldPassCtrl.text == 'admin123') {
+                final db = await DatabaseHelper().database;
+                await db.update(
+                  DBConstants.tableUsers,
+                  {'password_hash': newPassCtrl.text, 'updated_at': DatabaseHelper.now},
+                  where: 'username = ?',
+                  whereArgs: ['admin'],
+                );
+                Navigator.pop(ctx, true);
+              } else {
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('كلمة المرور الحالية غير صحيحة')));
+              }
+            },
+            child: const Text('تغيير'),
+          ),
+        ],
+      ),
+    );
+    if (result == true && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم تغيير كلمة المرور بنجاح')));
+    }
+  }
+
   @override
   void dispose() {
     _companyNameCtrl.dispose(); _currencyCtrl.dispose(); _boxSizeCtrl.dispose();
     _lowStockCtrl.dispose(); _sessionTimeoutCtrl.dispose();
+    _currencySymbolCtrl.dispose(); _decimalPlacesCtrl.dispose();
+    _taxNameCtrl.dispose(); _taxRateCtrl.dispose();
+    _syncIntervalCtrl.dispose();
+    _reportFooterCtrl.dispose();
     super.dispose();
   }
 
@@ -248,7 +362,72 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     SwitchListTile(title: const Text('الوضع الداكن'), value: _darkMode, onChanged: (v) => setState(() => _darkMode = v)),
                   ]),
 
-                  // ============ المرحلة الثانية: أقسام جديدة ============
+                  // ============ قسم المستخدمين والصلاحيات ============
+                  _buildSection('👥 المستخدمون والصلاحيات', [
+                    ListTile(
+                      leading: const Icon(Icons.people, color: AppTheme.primaryColor),
+                      title: const Text('إدارة المستخدمين'),
+                      subtitle: Text('عدد المستخدمين: $_usersCount'),
+                      trailing: const Icon(Icons.arrow_forward_ios),
+                      onTap: () => Navigator.pushNamed(context, '/users'),
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.security, color: AppTheme.warningColor),
+                      title: const Text('الصلاحيات والأدوار'),
+                      subtitle: const Text('تحديد صلاحيات كل دور'),
+                      trailing: const Icon(Icons.arrow_forward_ios),
+                      onTap: () => Navigator.pushNamed(context, '/roles'),
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.lock, color: AppTheme.errorColor),
+                      title: const Text('تغيير كلمة المرور'),
+                      subtitle: const Text('تغيير كلمة مرور المستخدم الحالي'),
+                      trailing: const Icon(Icons.arrow_forward_ios),
+                      onTap: () => _changePasswordDialog(),
+                    ),
+                  ]),
+
+                  // الأقسام الجديدة
+                  _buildSection('💱 العملة والضرائب', [
+                    TextField(controller: _currencySymbolCtrl, decoration: const InputDecoration(labelText: 'رمز العملة')),
+                    const SizedBox(height: 12),
+                    TextField(controller: _decimalPlacesCtrl, decoration: const InputDecoration(labelText: 'المنازل العشرية'), keyboardType: TextInputType.number),
+                    const SizedBox(height: 16),
+                    SwitchListTile(title: const Text('تفعيل الضرائب'), value: _taxEnabled, onChanged: (v) => setState(() => _taxEnabled = v)),
+                    TextField(controller: _taxNameCtrl, decoration: const InputDecoration(labelText: 'اسم الضريبة')),
+                    const SizedBox(height: 12),
+                    TextField(controller: _taxRateCtrl, decoration: const InputDecoration(labelText: 'نسبة الضريبة (%)'), keyboardType: TextInputType.number),
+                    const SizedBox(height: 12),
+                    SwitchListTile(title: const Text('تضمين الضريبة في السعر'), value: _taxIncluded, onChanged: (v) => setState(() => _taxIncluded = v)),
+                    SwitchListTile(title: const Text('إظهار الضريبة في الفواتير'), value: _showTaxInInvoice, onChanged: (v) => setState(() => _showTaxInInvoice = v)),
+                  ]),
+                  _buildSection('🔄 المزامنة', [
+                    SwitchListTile(title: const Text('المزامنة التلقائية'), value: _autoSync, onChanged: (v) => setState(() => _autoSync = v)),
+                    TextField(controller: _syncIntervalCtrl, decoration: const InputDecoration(labelText: 'فترة المزامنة (دقائق)'), keyboardType: TextInputType.number),
+                    const SizedBox(height: 12),
+                    SwitchListTile(title: const Text('المزامنة عبر Wi-Fi فقط'), value: _syncOnWifiOnly, onChanged: (v) => setState(() => _syncOnWifiOnly = v)),
+                    const SizedBox(height: 12),
+                    ListTile(
+                      leading: const Icon(Icons.sync),
+                      title: const Text('مزامنة الآن'),
+                      trailing: ElevatedButton(onPressed: () { Navigator.pushNamed(context, '/sync'); }, child: const Text('فتح')),
+                    ),
+                  ]),
+                  _buildSection('🖨️ التقارير والطباعة', [
+                    SwitchListTile(title: const Text('إظهار الشعار في التقرير'), value: _showLogoOnReport, onChanged: (v) => setState(() => _showLogoOnReport = v)),
+                    SwitchListTile(title: const Text('إظهار التاريخ'), value: _showDateOnReport, onChanged: (v) => setState(() => _showDateOnReport = v)),
+                    SwitchListTile(title: const Text('إظهار اسم المستخدم'), value: _showUserOnReport, onChanged: (v) => setState(() => _showUserOnReport = v)),
+                    SwitchListTile(title: const Text('إظهار التوقيع'), value: _showSignature, onChanged: (v) => setState(() => _showSignature = v)),
+                    TextField(controller: _reportFooterCtrl, decoration: const InputDecoration(labelText: 'نص تذييل التقرير'), maxLines: 2),
+                  ]),
+                  _buildSection('🔔 الإشعارات', [
+                    SwitchListTile(title: const Text('تنبيه نقص المخزون'), subtitle: const Text('عند وصول المخزون للحد الأدنى'), value: _notifyLowStock, onChanged: (v) => setState(() => _notifyLowStock = v)),
+                    SwitchListTile(title: const Text('تنبيه المديونيات'), subtitle: const Text('عند وجود ديون مستحقة'), value: _notifyDebts, onChanged: (v) => setState(() => _notifyDebts = v)),
+                    SwitchListTile(title: const Text('تنبيه المصروفات'), subtitle: const Text('عند تسجيل مصروف جديد'), value: _notifyExpenses, onChanged: (v) => setState(() => _notifyExpenses = v)),
+                    SwitchListTile(title: const Text('تنبيه الإنتاج'), subtitle: const Text('عند اكتمال دفعة إنتاج'), value: _notifyProduction, onChanged: (v) => setState(() => _notifyProduction = v)),
+                    SwitchListTile(title: const Text('تنبيه فشل المزامنة'), value: _notifySyncFail, onChanged: (v) => setState(() => _notifySyncFail = v)),
+                  ]),
+
                   _buildSection('💾 النسخ الاحتياطي', [
                     ListTile(
                       leading: const Icon(Icons.backup),
@@ -277,9 +456,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       leading: const Icon(Icons.history),
                       title: const Text('عرض سجل العمليات'),
                       trailing: const Icon(Icons.arrow_forward_ios),
-                      onTap: () {
-                        Navigator.pushNamed(context, '/audit');
-                      },
+                      onTap: () => Navigator.pushNamed(context, '/audit'),
                     ),
                   ]),
 
