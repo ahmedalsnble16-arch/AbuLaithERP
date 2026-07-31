@@ -33,7 +33,7 @@ jobs:
       - name: Upload Analysis Report
         uses: actions/upload-artifact@v4
         with:
-          name: analysisreport
+          name: analysisreports
           path: analysis_report.txt
       
       - name: Build APK
