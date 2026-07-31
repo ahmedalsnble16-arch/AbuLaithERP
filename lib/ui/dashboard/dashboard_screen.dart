@@ -6,13 +6,11 @@ import '../../core/constants/db_constants.dart';
 import '../products/products_screen.dart';
 import '../raw_materials/materials_screen.dart';
 import '../production/production_screen.dart';
-import '../production/production_comparison_screen.dart';
 import '../warehouse/warehouse_screen.dart';
 import '../showroom/showroom_screen.dart';
 import '../treasury/treasury_screen.dart';
 import '../expenses/expenses_screen.dart';
 import '../distributors/distributors_screen.dart';
-import '../distributors/all_loads_screen.dart';
 import '../reports/reports_menu_screen.dart';
 import '../sync/sync_screen.dart';
 import '../customers/customers_screen.dart';
@@ -37,18 +35,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
   double _todaySales = 0;
   bool _isLoading = true;
   List<Map<String, dynamic>> _recentActivities = [];
+  String _username = 'المستخدم';
 
   @override
   void initState() {
     super.initState();
-    _loadDashboardData();
+    _loadData();
   }
 
-  Future<void> _loadDashboardData() async {
+  Future<void> _loadData() async {
     setState(() => _isLoading = true);
     try {
       final db = await DatabaseHelper().database;
-      // 1. رصيد الخزنة
+
+      // رصيد الخزنة
       final balanceResult = await db.rawQuery('''
         SELECT COALESCE(SUM(CASE WHEN transaction_type = 'قبض' THEN amount ELSE -amount END), 0) as balance
         FROM ${DBConstants.tableTreasury}
@@ -56,14 +56,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ''');
       _balance = (balanceResult.first['balance'] as num?)?.toDouble() ?? 0.0;
 
-      // 2. قيمة المخزون
+      // قيمة المخزون (عدد القطع)
       final stockResult = await db.rawQuery('''
         SELECT COALESCE(SUM(quantity_pieces), 0) as total
         FROM ${DBConstants.tableStock}
       ''');
       _stockValue = (stockResult.first['total'] as num?)?.toInt() ?? 0;
 
-      // 3. إنتاج اليوم
+      // إنتاج اليوم
       final today = DateTime.now().toIso8601String().substring(0, 10);
       final prodResult = await db.rawQuery('''
         SELECT COALESCE(SUM(good_pieces), 0) as total
@@ -72,7 +72,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ''', [today]);
       _todayProduction = (prodResult.first['total'] as num?)?.toInt() ?? 0;
 
-      // 4. مبيعات اليوم
+      // مبيعات اليوم
       final salesResult = await db.rawQuery('''
         SELECT COALESCE(SUM(grand_total), 0) as total
         FROM ${DBConstants.tableSales}
@@ -80,15 +80,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ''', [today]);
       _todaySales = (salesResult.first['total'] as num?)?.toDouble() ?? 0.0;
 
-      // 5. آخر العمليات (محاكاة بسيطة)
+      // آخر العمليات
       final auditLogs = await db.query(
         DBConstants.tableAuditLogs,
         orderBy: 'created_at DESC',
         limit: 5,
       );
       _recentActivities = auditLogs;
+
+      // اسم المستخدم
+      final userData = await SessionManager.getUser();
+      _username = userData['username'] ?? 'المستخدم';
     } catch (e) {
-      // في حال وجود خطأ، نعرض قيم افتراضية
+      // في حال وجود خطأ، تبقى القيم الافتراضية
     }
     setState(() => _isLoading = false);
   }
@@ -102,9 +106,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final user = SessionManager().getCurrentUser();
-    final username = user?.fullName ?? 'مدير النظام';
-
     return Scaffold(
       appBar: AppBar(
         title: const Text('لوحة التحكم'),
@@ -118,13 +119,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ],
       ),
       drawer: AppDrawer(
-        username: username,
+        username: _username,
         onLogout: _logout,
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
-              onRefresh: _loadDashboardData,
+              onRefresh: _loadData,
               child: SingleChildScrollView(
                 physics: const AlwaysScrollableScrollPhysics(),
                 padding: const EdgeInsets.all(16),
@@ -152,7 +153,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
-                                    'مرحباً $username',
+                                    'مرحباً $_username',
                                     style: const TextStyle(
                                         fontSize: 18,
                                         fontWeight: FontWeight.bold),
@@ -271,14 +272,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         _buildQuickCard(Icons.backup, 'نسخ احتياطي',
                             AppTheme.warningColor, () {
                           Navigator.push(context, MaterialPageRoute(builder: (_) => const BackupScreen()));
-                        }),
-                        _buildQuickCard(Icons.compare_arrows, 'مقارنة الإنتاج',
-                            AppTheme.primaryColor, () {
-                          Navigator.push(context, MaterialPageRoute(builder: (_) => const ProductionComparisonScreen()));
-                        }),
-                        _buildQuickCard(Icons.summarize, 'جدول الحملات',
-                            Colors.indigo, () {
-                          Navigator.push(context, MaterialPageRoute(builder: (_) => const AllLoadsScreen()));
                         }),
                       ],
                     ),
@@ -485,15 +478,26 @@ class AppDrawer extends StatelessWidget {
                     Navigator.pop(context);
                     Navigator.push(context, MaterialPageRoute(builder: (_) => const ReportsMenuScreen()));
                   }),
-                  _drawerItem(context, Icons.compare_arrows, 'مقارنة الإنتاج', () {
+                  _drawerItem(context, Icons.people, 'العملاء', () {
                     Navigator.pop(context);
-                    Navigator.push(context, MaterialPageRoute(builder: (_) => const ProductionComparisonScreen()));
+                    Navigator.push(context, MaterialPageRoute(builder: (_) => const CustomersScreen()));
                   }),
-                  _drawerItem(context, Icons.summarize, 'جدول الحملات', () {
+                  _drawerItem(context, Icons.business, 'الموردين', () {
                     Navigator.pop(context);
-                    Navigator.push(context, MaterialPageRoute(builder: (_) => const AllLoadsScreen()));
+                    Navigator.push(context, MaterialPageRoute(builder: (_) => const SuppliersScreen()));
                   }),
-                  const Divider(),
+                  _drawerItem(context, Icons.shopping_cart, 'المشتريات', () {
+                    Navigator.pop(context);
+                    Navigator.push(context, MaterialPageRoute(builder: (_) => const PurchasesScreen()));
+                  }),
+                  _drawerItem(context, Icons.badge, 'العمال', () {
+                    Navigator.pop(context);
+                    Navigator.push(context, MaterialPageRoute(builder: (_) => const WorkersScreen()));
+                  }),
+                  _drawerItem(context, Icons.sync, 'المزامنة', () {
+                    Navigator.pop(context);
+                    Navigator.push(context, MaterialPageRoute(builder: (_) => const SyncScreen()));
+                  }),
                   _drawerItem(context, Icons.settings, 'الإعدادات', () {
                     Navigator.pop(context);
                     Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen()));
