@@ -23,12 +23,9 @@ class _ComparisonReportScreenState extends State<ComparisonReportScreen> {
   String _selectedDate = DateTime.now().toIso8601String().substring(0, 10);
   bool _hasRunComparison = false;
 
-  // للجداول الذكية
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
   String _filterProduct = 'all';
-  String _sortColumn = '';
-  bool _sortAscending = true;
 
   @override
   void initState() {
@@ -65,74 +62,120 @@ class _ComparisonReportScreenState extends State<ComparisonReportScreen> {
         FROM ${DBConstants.tableProductionCompare}
         WHERE compare_date = ?
       ''', [yesterdayDate]);
-      _yesterdayRemaining = {
-        for (var row in yesterdayComparison)
-          row['product_id']: (row['remaining_pieces'] as num?)?.toInt() ?? 0
-      };
+      final map = <String, int>{};
+      for (var row in yesterdayComparison) {
+        final key = row['product_id']?.toString();
+        if (key != null) {
+          map[key] = (row['remaining_pieces'] as num?)?.toInt() ?? 0;
+        }
+      }
+      _yesterdayRemaining = map;
     } catch (e) {
       _yesterdayRemaining = {};
     }
 
-    final production = await db.rawQuery('''
-      SELECT product_id, COALESCE(SUM(good_pieces), 0) as total
-      FROM ${DBConstants.tableProductionBatches}
-      WHERE production_date = ? AND deleted = 0
-      GROUP BY product_id
-    ''', [_selectedDate]);
-    _todayProduction = {
-      for (var row in production)
-        row['product_id']: (row['total'] as num?)?.toInt() ?? 0
-    };
+    // Production today
+    {
+      final production = await db.rawQuery('''
+        SELECT product_id, COALESCE(SUM(good_pieces), 0) as total
+        FROM ${DBConstants.tableProductionBatches}
+        WHERE production_date = ? AND deleted = 0
+        GROUP BY product_id
+      ''', [_selectedDate]);
+      final map = <String, int>{};
+      for (var row in production) {
+        final key = row['product_id']?.toString();
+        if (key != null) {
+          map[key] = (row['total'] as num?)?.toInt() ?? 0;
+        }
+      }
+      _todayProduction = map;
+    }
 
-    final showroomOut = await db.rawQuery('''
-      SELECT product_id, COALESCE(SUM(ABS(quantity)), 0) as total
-      FROM ${DBConstants.tableStockMovements}
-      WHERE movement_type = 'تحويل' AND reference_type = 'showroom' AND created_at LIKE ?
-      GROUP BY product_id
-    ''', ['$_selectedDate%']);
-    _showroomOut = {
-      for (var row in showroomOut)
-        row['product_id']: (row['total'] as num?)?.toInt() ?? 0
-    };
+    // showroom out
+    {
+      final showroomOut = await db.rawQuery('''
+        SELECT product_id, COALESCE(SUM(ABS(quantity)), 0) as total
+        FROM ${DBConstants.tableStockMovements}
+        WHERE movement_type = 'تحويل' AND reference_type = 'showroom' AND created_at LIKE ?
+        GROUP BY product_id
+      ''', ['$_selectedDate%']);
+      final map = <String, int>{};
+      for (var row in showroomOut) {
+        final key = row['product_id']?.toString();
+        if (key != null) {
+          map[key] = (row['total'] as num?)?.toInt() ?? 0;
+        }
+      }
+      _showroomOut = map;
+    }
 
-    final distributorOut = await db.rawQuery('''
-      SELECT product_id, COALESCE(SUM(ABS(quantity)), 0) as total
-      FROM ${DBConstants.tableStockMovements}
-      WHERE movement_type = 'تحميل موزع' AND created_at LIKE ?
-      GROUP BY product_id
-    ''', ['$_selectedDate%']);
-    _distributorOut = {
-      for (var row in distributorOut)
-        row['product_id']: (row['total'] as num?)?.toInt() ?? 0
-    };
+    // distributor out
+    {
+      final distributorOut = await db.rawQuery('''
+        SELECT product_id, COALESCE(SUM(ABS(quantity)), 0) as total
+        FROM ${DBConstants.tableStockMovements}
+        WHERE movement_type = 'تحميل موزع' AND created_at LIKE ?
+        GROUP BY product_id
+      ''', ['$_selectedDate%']);
+      final map = <String, int>{};
+      for (var row in distributorOut) {
+        final key = row['product_id']?.toString();
+        if (key != null) {
+          map[key] = (row['total'] as num?)?.toInt() ?? 0;
+        }
+      }
+      _distributorOut = map;
+    }
 
-    final showroomReturn = await db.rawQuery('''
-      SELECT product_id, COALESCE(SUM(ABS(quantity)), 0) as total
-      FROM ${DBConstants.tableStockMovements}
-      WHERE movement_type = 'مرتجع' AND reference_type = 'showroom' AND created_at LIKE ?
-      GROUP BY product_id
-    ''', ['$_selectedDate%']);
-    _showroomReturn = {
-      for (var row in showroomReturn)
-        row['product_id']: (row['total'] as num?)?.toInt() ?? 0
-    };
+    // showroom return
+    {
+      final showroomReturn = await db.rawQuery('''
+        SELECT product_id, COALESCE(SUM(ABS(quantity)), 0) as total
+        FROM ${DBConstants.tableStockMovements}
+        WHERE movement_type = 'مرتجع' AND reference_type = 'showroom' AND created_at LIKE ?
+        GROUP BY product_id
+      ''', ['$_selectedDate%']);
+      final map = <String, int>{};
+      for (var row in showroomReturn) {
+        final key = row['product_id']?.toString();
+        if (key != null) {
+          map[key] = (row['total'] as num?)?.toInt() ?? 0;
+        }
+      }
+      _showroomReturn = map;
+    }
 
-    final distributorReturn = await db.rawQuery('''
-      SELECT product_id, COALESCE(SUM(ABS(quantity)), 0) as total
-      FROM ${DBConstants.tableStockMovements}
-      WHERE movement_type = 'مرتجع' AND reference_type = 'distributor' AND created_at LIKE ?
-      GROUP BY product_id
-    ''', ['$_selectedDate%']);
-    _distributorReturn = {
-      for (var row in distributorReturn)
-        row['product_id']: (row['total'] as num?)?.toInt() ?? 0
-    };
+    // distributor return
+    {
+      final distributorReturn = await db.rawQuery('''
+        SELECT product_id, COALESCE(SUM(ABS(quantity)), 0) as total
+        FROM ${DBConstants.tableStockMovements}
+        WHERE movement_type = 'مرتجع' AND reference_type = 'distributor' AND created_at LIKE ?
+        GROUP BY product_id
+      ''', ['$_selectedDate%']);
+      final map = <String, int>{};
+      for (var row in distributorReturn) {
+        final key = row['product_id']?.toString();
+        if (key != null) {
+          map[key] = (row['total'] as num?)?.toInt() ?? 0;
+        }
+      }
+      _distributorReturn = map;
+    }
 
-    final currentStock = await db.query(DBConstants.tableStock);
-    _currentStock = {
-      for (var row in currentStock)
-        row['product_id']: (row['quantity_pieces'] as num?)?.toInt() ?? 0
-    };
+    // current stock
+    {
+      final currentStock = await db.query(DBConstants.tableStock);
+      final map = <String, int>{};
+      for (var row in currentStock) {
+        final key = row['product_id']?.toString();
+        if (key != null) {
+          map[key] = (row['quantity_pieces'] as num?)?.toInt() ?? 0;
+        }
+      }
+      _currentStock = map;
+    }
 
     setState(() {
       _hasRunComparison = true;
@@ -288,7 +331,6 @@ class _ComparisonReportScreenState extends State<ComparisonReportScreen> {
                     ],
                   ),
                   const SizedBox(height: 8),
-                  // شريط البحث الذكي
                   TextField(
                     controller: _searchController,
                     decoration: const InputDecoration(
@@ -439,7 +481,6 @@ class _ComparisonReportScreenState extends State<ComparisonReportScreen> {
           DataCell(Text(_piecesToDisplay(available, boxSize))),
           DataCell(Text(_piecesToDisplay(outgoing, boxSize))),
           DataCell(Text(_piecesToDisplay(theoretical, boxSize))),
-          // خلية "الفعلي" قابلة للتعديل المباشر
           DataCell(
             SizedBox(
               width: 80,
@@ -490,15 +531,9 @@ class _ComparisonReportScreenState extends State<ComparisonReportScreen> {
               scrollDirection: Axis.horizontal,
               child: DataTable(
                 columnSpacing: 12,
-                columns: columns.map((c) => DataColumn(
-                  label: Text(c),
-                  onSort: (columnIndex, ascending) {
-                    setState(() {
-                      _sortColumn = c;
-                      _sortAscending = ascending;
-                    });
-                  },
-                )).toList(),
+                columns: columns
+                    .map((c) => DataColumn(label: Text(c)))
+                    .toList(),
                 rows: rows,
               ),
             ),
