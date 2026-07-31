@@ -1,6 +1,6 @@
 import 'package:uuid/uuid.dart';
+import 'package:sqflite/sqflite.dart';
 import '../../core/database/database_helper.dart';
-import '../models/distributor_product_price.dart';
 
 class DistributorProductPriceRepository {
   final DatabaseHelper _dbHelper = DatabaseHelper();
