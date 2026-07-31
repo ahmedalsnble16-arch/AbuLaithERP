@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import '../../config/theme.dart';
 import '../../core/constants/db_constants.dart';
 import '../../core/database/database_helper.dart';
 
@@ -21,10 +20,10 @@ class _AllLoadsScreenState extends State<AllLoadsScreen> {
   @override
   void initState() {
     super.initState();
-    _loadData();
+    fetchData();
   }
 
-  Future<void> _loadData() async {
+  Future<void> fetchData() async {
     setState(() => _isLoading = true);
     final db = await DatabaseHelper().database;
 
@@ -104,11 +103,11 @@ class _AllLoadsScreenState extends State<AllLoadsScreen> {
                           controller: TextEditingController(text: _selectedDate),
                           onSubmitted: (v) {
                             _selectedDate = v;
-                            _loadData();
+                            fetchData();
                           },
                         ),
                       ),
-                      IconButton(icon: const Icon(Icons.search), onPressed: _loadData),
+                      IconButton(icon: const Icon(Icons.search), onPressed: fetchData),
                     ],
                   ),
                 ),
