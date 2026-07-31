@@ -1,4 +1,3 @@
-```dart
 import 'package:sqflite/sqflite.dart';
 import '../../core/constants/db_constants.dart';
 import '../../core/database/database_helper.dart';
@@ -73,4 +72,3 @@ class SettingsRepository {
     }
   }
 }
-```
