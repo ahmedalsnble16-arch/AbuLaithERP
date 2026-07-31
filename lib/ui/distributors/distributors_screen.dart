@@ -2,10 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 import '../../config/theme.dart';
 import '../../core/database/database_helper.dart';
-import '../../core/constants/db_constants.dart';
 import '../../data/models/distributor.dart';
 import '../../data/repositories/distributor_repository.dart';
 import 'distributor_account_screen.dart';
+import 'distributor_prices_screen.dart';
 
 class DistributorsScreen extends StatefulWidget {
   const DistributorsScreen({super.key});
@@ -123,10 +123,19 @@ class _DistributorsScreenState extends State<DistributorsScreen> {
                               leading: const CircleAvatar(backgroundColor: Colors.indigo, child: Icon(Icons.local_shipping, color: Colors.white)),
                               title: Text(d.name, style: const TextStyle(fontWeight: FontWeight.bold)),
                               subtitle: Text('${d.vehicle ?? ""} | ${d.phone ?? ""}'),
-                              trailing: Text('${d.currentBalance} ر.ي', style: TextStyle(color: d.currentBalance > 0 ? AppTheme.errorColor : AppTheme.successColor, fontWeight: FontWeight.bold)),
-                              onTap: () {
-                                Navigator.push(context, MaterialPageRoute(builder: (_) => DistributorAccountScreen(distributor: d))).then((_) => _load());
-                              },
+                              trailing: PopupMenuButton<String>(
+                                onSelected: (value) {
+                                  if (value == 'account') {
+                                    Navigator.push(context, MaterialPageRoute(builder: (_) => DistributorAccountScreen(distributor: d))).then((_) => _load());
+                                  } else if (value == 'prices') {
+                                    Navigator.push(context, MaterialPageRoute(builder: (_) => DistributorPricesScreen(distributorId: d.id, distributorName: d.name)));
+                                  }
+                                },
+                                itemBuilder: (ctx) => [
+                                  const PopupMenuItem(value: 'account', child: Text('📄 كشف حساب')),
+                                  const PopupMenuItem(value: 'prices', child: Text('💰 أسعار المنتجات')),
+                                ],
+                              ),
                             ),
                           );
                         },
