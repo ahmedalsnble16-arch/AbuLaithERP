@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:uuid/uuid.dart';
 import '../../config/theme.dart';
 import '../../core/constants/db_constants.dart';
 import '../../core/database/database_helper.dart';
@@ -23,7 +22,7 @@ class _DistributorAccountScreenState extends State<DistributorAccountScreen> {
   List<Product> _products = [];
   Map<String, TextEditingController> _boxesControllers = {};
   Map<String, TextEditingController> _piecesControllers = {};
-  Map<String, double> _pricesForDistributor = {}; // سعر خاص لكل منتج لهذا الموزع
+  Map<String, double> _pricesForDistributor = {};
   double _prevBalance = 0;
   double _collectedCash = 0;
   double _returnedValue = 0;
@@ -45,13 +44,12 @@ class _DistributorAccountScreenState extends State<DistributorAccountScreen> {
       // 1. جلب المنتجات النشطة
       final products = await _productRepo.getAll();
       
-      // 2. جلب الأسعار الخاصة بالموزع (من جدول distributor_prices إن وجد، وإلا فسعر الجملة الافتراضي)
-      // في الوقت الحالي نستخدم سعر الجملة للمنتج كسعر افتراضي للموزع
+      // 2. جلب الأسعار الخاصة بالموزع
       for (var p in products) {
         _pricesForDistributor[p.id] = p.wholesalePrice;
       }
       
-      // 3. جلب الرصيد المرحل (من حقل current_balance للموزع)
+      // 3. جلب الرصيد المرحل
       _prevBalance = widget.distributor.currentBalance;
       
       // 4. جلب الحملات السابقة
@@ -77,7 +75,6 @@ class _DistributorAccountScreenState extends State<DistributorAccountScreen> {
     }
   }
 
-  // ============ حساب الكميات ============
   int _totalPieces(String productId) {
     final product = _products.firstWhere((p) => p.id == productId);
     final boxes = int.tryParse(_boxesControllers[productId]?.text ?? '0') ?? 0;
@@ -91,7 +88,6 @@ class _DistributorAccountScreenState extends State<DistributorAccountScreen> {
     return '$boxes.${remaining.toString().padLeft(2, '0')}';
   }
 
-  // ============ حساب المبالغ ============
   double _loadValue(String productId) {
     final price = _pricesForDistributor[productId] ?? 0;
     return _totalPieces(productId) * price;
@@ -102,7 +98,6 @@ class _DistributorAccountScreenState extends State<DistributorAccountScreen> {
   double get _totalRequired => _prevBalance + _totalLoadValue;
   double get _finalBalance => _totalRequired - _discountValue - _collectedCash - _returnedValue - _damagedValue;
 
-  // ============ حفظ الحملة ============
   Future<void> _saveLoad() async {
     final items = _products
         .where((p) => _totalPieces(p.id) > 0)
@@ -118,13 +113,11 @@ class _DistributorAccountScreenState extends State<DistributorAccountScreen> {
       return;
     }
 
-    // 1. إنشاء الحملة
     await _distRepo.createLoad(
       distributorId: widget.distributor.id,
       items: items,
     );
 
-    // 2. تحديث رصيد الموزع
     final db = await DatabaseHelper().database;
     await db.update(
       DBConstants.tableDistributors,
@@ -159,7 +152,6 @@ class _DistributorAccountScreenState extends State<DistributorAccountScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // ========== رأس الكشف ==========
                   Card(
                     child: Padding(
                       padding: const EdgeInsets.all(12),
@@ -186,8 +178,6 @@ class _DistributorAccountScreenState extends State<DistributorAccountScreen> {
                     ),
                   ),
                   const SizedBox(height: 16),
-
-                  // ========== الحملة الحالية ==========
                   const Text('🚚 الحملة الحالية', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 8),
                   ...(_products.map((p) {
@@ -242,8 +232,6 @@ class _DistributorAccountScreenState extends State<DistributorAccountScreen> {
                     );
                   })),
                   const SizedBox(height: 16),
-
-                  // ========== صندوق الحساب ==========
                   Card(
                     color: AppTheme.primaryColor.withAlpha(15),
                     child: Padding(
@@ -280,8 +268,6 @@ class _DistributorAccountScreenState extends State<DistributorAccountScreen> {
                   ),
                   const SizedBox(height: 16),
                   ElevatedButton.icon(onPressed: _saveLoad, icon: const Icon(Icons.save), label: const Text('حفظ الحملة')),
-
-                  // ========== الحملات السابقة ==========
                   const SizedBox(height: 24),
                   const Text('📦 الحملات السابقة', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 8),
