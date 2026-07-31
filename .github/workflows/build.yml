@@ -1,4 +1,4 @@
-reporttBuild APK
+name: Build APK
 
 on:
   push:
