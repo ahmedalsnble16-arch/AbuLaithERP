@@ -4,11 +4,13 @@ import '../ui/dashboard/dashboard_screen.dart';
 import '../ui/products/products_screen.dart';
 import '../ui/raw_materials/materials_screen.dart';
 import '../ui/production/production_screen.dart';
+import '../ui/production/production_comparison_screen.dart';
 import '../ui/warehouse/warehouse_screen.dart';
 import '../ui/showroom/showroom_screen.dart';
 import '../ui/treasury/treasury_screen.dart';
 import '../ui/expenses/expenses_screen.dart';
 import '../ui/distributors/distributors_screen.dart';
+import '../ui/distributors/all_loads_screen.dart';
 import '../ui/reports/reports_menu_screen.dart';
 import '../ui/sync/sync_screen.dart';
 import '../ui/customers/customers_screen.dart';
@@ -26,11 +28,13 @@ class AppRoutes {
     '/products': (context) => const ProductsScreen(),
     '/raw-materials': (context) => const MaterialsScreen(),
     '/production': (context) => const ProductionScreen(),
+    '/production-comparison': (context) => const ProductionComparisonScreen(),
     '/warehouse': (context) => const WarehouseScreen(),
     '/showroom': (context) => const ShowroomScreen(),
     '/treasury': (context) => const TreasuryScreen(),
     '/expenses': (context) => const ExpensesScreen(),
     '/distributors': (context) => const DistributorsScreen(),
+    '/all-loads': (context) => const AllLoadsScreen(),
     '/reports': (context) => const ReportsMenuScreen(),
     '/sync': (context) => const SyncScreen(),
     '/customers': (context) => const CustomersScreen(),
@@ -47,11 +51,13 @@ class AppRoutes {
   static const String products = '/products';
   static const String rawMaterials = '/raw-materials';
   static const String production = '/production';
+  static const String productionComparison = '/production-comparison';
   static const String warehouse = '/warehouse';
   static const String showroom = '/showroom';
   static const String treasury = '/treasury';
   static const String expenses = '/expenses';
   static const String distributors = '/distributors';
+  static const String allLoads = '/all-loads';
   static const String reports = '/reports';
   static const String sync = '/sync';
   static const String customers = '/customers';
