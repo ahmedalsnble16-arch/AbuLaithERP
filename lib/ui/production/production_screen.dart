@@ -40,10 +40,10 @@ class _ProductionScreenState extends State<ProductionScreen> {
     setState(() {
       _products = products.where((p) => p.active).toList();
       for (var p in _products) {
-        _goodBoxesCtrl[p.id] = TextEditingController(text: '0');
-        _goodPiecesCtrl[p.id] = TextEditingController(text: '0');
-        _damagedBoxesCtrl[p.id] = TextEditingController(text: '0');
-        _damagedPiecesCtrl[p.id] = TextEditingController(text: '0');
+        _goodBoxesCtrl[p.id] ??= TextEditingController(text: '0');
+        _goodPiecesCtrl[p.id] ??= TextEditingController(text: '0');
+        _damagedBoxesCtrl[p.id] ??= TextEditingController(text: '0');
+        _damagedPiecesCtrl[p.id] ??= TextEditingController(text: '0');
       }
       _isLoading = false;
     });
@@ -105,13 +105,16 @@ class _ProductionScreenState extends State<ProductionScreen> {
     try {
       final db = await DatabaseHelper().database;
       final now = DatabaseHelper.now;
-      final batchNumber = 'PROD-${DateTime.now().millisecondsSinceEpoch}';
+      final batchPrefix = 'PROD-${DateTime.now().millisecondsSinceEpoch}';
 
-      for (var item in items) {
+      for (var i = 0; i < items.length; i++) {
+        final item = items[i];
         final productId = item['productId'] as String;
         final good = item['goodPieces'] as int;
         final damaged = item['damagedPieces'] as int;
         final total = item['totalPieces'] as int;
+        // رقم فريد لكل منتج داخل الدفعة
+        final batchNumber = '$batchPrefix-$i';
 
         await db.insert(DBConstants.tableProductionBatches, {
           'id': const Uuid().v4(),
@@ -235,6 +238,12 @@ class _ProductionScreenState extends State<ProductionScreen> {
           title: const Text('الإنتاج'),
           bottom: const TabBar(
             isScrollable: true,
+            labelColor: Colors.white,
+            unselectedLabelColor: Colors.white70,
+            indicatorColor: Colors.white,
+            indicatorWeight: 3,
+            labelStyle: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+            unselectedLabelStyle: TextStyle(fontSize: 13),
             tabs: [
               Tab(text: 'تسجيل الإنتاج'),
               Tab(text: 'سجل الإنتاج'),
