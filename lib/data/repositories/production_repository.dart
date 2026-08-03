@@ -30,120 +30,180 @@ class ProductionRepository {
   }
 
   Future<String> createBatch(ProductionBatch batch) async {
+    if (batch.goodPieces < 0 || batch.expectedPieces < 0) {
+      throw Exception('قيم الإنتاج غير صالحة');
+    }
+
     final db = await _dbHelper.database;
     final id = batch.id.isNotEmpty ? batch.id : _uuid.v4();
     final now = DateTime.now().toIso8601String();
+    final productionNumber =
+        'PROD-${DateTime.now().millisecondsSinceEpoch}-${id.substring(0, 4)}';
 
-    final productionNumber = 'PROD-${DateTime.now().millisecondsSinceEpoch}';
+    await db.transaction((txn) async {
+      final data = batch.toMap()
+        ..['id'] = id
+        ..['production_number'] = productionNumber
+        ..['created_at'] = now
+        ..['updated_at'] = now
+        ..['status'] = 'معتمدة';
 
-    final data = batch.toMap()
-      ..['id'] = id
-      ..['production_number'] = productionNumber
-      ..['created_at'] = now
-      ..['updated_at'] = now
-      ..['status'] = 'معتمدة';
+      await txn.insert(DBConstants.tableProductionBatches, data);
 
-    await db.insert(DBConstants.tableProductionBatches, data);
-
-    final stockList = await db.query(
-      DBConstants.tableStock,
-      where: 'product_id = ?',
-      whereArgs: [batch.productId],
-    );
-
-    if (stockList.isEmpty) {
-      await db.insert(DBConstants.tableStock, {
-        'id': _uuid.v4(),
-        'product_id': batch.productId,
-        'quantity_pieces': batch.goodPieces,
-        'average_cost': batch.productionCost,
-        'last_update': now,
-        'created_at': now,
-        'updated_at': now,
-      });
-    } else {
-      final currentQty = stockList.first['quantity_pieces'] as int? ?? 0;
-      await db.update(
+      final stockList = await txn.query(
         DBConstants.tableStock,
-        {
-          'quantity_pieces': currentQty + batch.goodPieces,
-          'last_update': now,
-          'updated_at': now,
-        },
         where: 'product_id = ?',
         whereArgs: [batch.productId],
       );
-    }
 
-    await db.insert(DBConstants.tableStockMovements, {
-      'id': _uuid.v4(),
-      'product_id': batch.productId,
-      'movement_type': 'إنتاج',
-      'quantity': batch.goodPieces,
-      'reference_id': id,
-      'reference_type': 'production',
-      'notes': 'إنتاج دفعة $productionNumber',
-      'created_at': now,
-      'created_by': batch.createdBy,
-      'device_id': batch.deviceId,
-      'sync_status': 'Pending',
+      if (stockList.isEmpty) {
+        await txn.insert(DBConstants.tableStock, {
+          'id': _uuid.v4(),
+          'product_id': batch.productId,
+          'quantity_pieces': batch.goodPieces,
+          'reserved_quantity': 0,
+          'average_cost': batch.productionCost,
+          'last_update': now,
+          'created_at': now,
+          'updated_at': now,
+        });
+      } else {
+        final currentQty = stockList.first['quantity_pieces'] as int? ?? 0;
+        await txn.update(
+          DBConstants.tableStock,
+          {
+            'quantity_pieces': currentQty + batch.goodPieces,
+            'last_update': now,
+            'updated_at': now,
+          },
+          where: 'product_id = ?',
+          whereArgs: [batch.productId],
+        );
+      }
+
+      await txn.insert(DBConstants.tableStockMovements, {
+        'id': _uuid.v4(),
+        'product_id': batch.productId,
+        'movement_type': 'إنتاج',
+        'quantity': batch.goodPieces,
+        'reference_id': id,
+        'reference_type': 'production',
+        'notes': 'إنتاج دفعة $productionNumber',
+        'created_at': now,
+        'created_by': batch.createdBy,
+        'device_id': batch.deviceId,
+        'sync_status': 'Pending',
+      });
+
+      final compare = ProductionCompare(
+        id: _uuid.v4(),
+        productId: batch.productId,
+        batchId: id,
+        expectedPieces: batch.expectedPieces,
+        actualPieces: batch.goodPieces,
+        difference: batch.expectedPieces - batch.goodPieces,
+        lossPercent: batch.expectedPieces > 0
+            ? ((batch.damagedPieces + batch.lostPieces) / batch.expectedPieces) * 100
+            : 0,
+        notes: batch.notes,
+        compareDate: batch.productionDate,
+        createdAt: now,
+        createdBy: batch.createdBy,
+        deviceId: batch.deviceId,
+      );
+      await txn.insert(DBConstants.tableProductionCompare, compare.toMap());
+
+      await txn.insert(DBConstants.tableAuditLogs, {
+        'id': _uuid.v4(),
+        'user_id': batch.createdBy,
+        'module': 'الإنتاج',
+        'action': 'تسجيل إنتاج',
+        'old_data': null,
+        'new_data':
+            'دفعة $productionNumber - صالح ${batch.goodPieces} / متوقع ${batch.expectedPieces}',
+        'device_id': batch.deviceId,
+        'created_at': now,
+      });
     });
-
-    final compare = ProductionCompare(
-      id: _uuid.v4(),
-      productId: batch.productId,
-      batchId: id,
-      expectedPieces: batch.expectedPieces,
-      actualPieces: batch.goodPieces,
-      difference: batch.expectedPieces - batch.goodPieces,
-      lossPercent: batch.expectedPieces > 0
-          ? ((batch.damagedPieces + batch.lostPieces) / batch.expectedPieces) * 100
-          : 0,
-      notes: batch.notes,
-      compareDate: batch.productionDate,
-      createdAt: now,
-      createdBy: batch.createdBy,
-      deviceId: batch.deviceId,
-    );
-    await db.insert(DBConstants.tableProductionCompare, compare.toMap());
 
     return id;
   }
 
   Future<void> deleteBatch(String batchId) async {
     final db = await _dbHelper.database;
-    final batchData = await db.query(
-      DBConstants.tableProductionBatches,
-      where: 'id = ?',
-      whereArgs: [batchId],
-    );
-    if (batchData.isNotEmpty) {
+    final now = DateTime.now().toIso8601String();
+
+    await db.transaction((txn) async {
+      final batchData = await txn.query(
+        DBConstants.tableProductionBatches,
+        where: 'id = ? AND deleted = 0',
+        whereArgs: [batchId],
+      );
+      if (batchData.isEmpty) {
+        throw Exception('الدفعة غير موجودة أو محذوفة مسبقاً');
+      }
+
       final batch = ProductionBatch.fromMap(batchData.first);
-      final stockList = await db.query(
+
+      final stockList = await txn.query(
         DBConstants.tableStock,
         where: 'product_id = ?',
         whereArgs: [batch.productId],
       );
       if (stockList.isNotEmpty) {
         final currentQty = stockList.first['quantity_pieces'] as int? ?? 0;
-        final newQty = currentQty - batch.goodPieces;
-        await db.update(
+        // منع الحذف إذا كانت البضاعة قد صُرفت/بِيعت
+        if (currentQty < batch.goodPieces) {
+          throw Exception(
+              'لا يمكن حذف الدفعة: المخزون الحالي ($currentQty) أقل من إنتاج الدفعة (${batch.goodPieces})، غالباً تم صرف/بيع جزء منها');
+        }
+        await txn.update(
           DBConstants.tableStock,
-          {
-            'quantity_pieces': newQty < 0 ? 0 : newQty,
-            'updated_at': DateTime.now().toIso8601String(),
-          },
+          {'quantity_pieces': currentQty - batch.goodPieces, 'updated_at': now},
           where: 'product_id = ?',
           whereArgs: [batch.productId],
         );
       }
-    }
 
-    await db.update(
-      DBConstants.tableProductionBatches,
-      {'deleted': 1, 'updated_at': DateTime.now().toIso8601String()},
-      where: 'id = ?',
-      whereArgs: [batchId],
-    );
+      // حركة مخزون عكسية
+      await txn.insert(DBConstants.tableStockMovements, {
+        'id': _uuid.v4(),
+        'product_id': batch.productId,
+        'movement_type': 'حذف إنتاج',
+        'quantity': -batch.goodPieces,
+        'reference_id': batchId,
+        'reference_type': 'production_delete',
+        'notes': 'حذف دفعة إنتاج',
+        'created_at': now,
+        'created_by': batch.createdBy,
+        'device_id': batch.deviceId,
+        'sync_status': 'Pending',
+      });
+
+      // حذف سجل المقارنة المرتبط
+      await txn.delete(
+        DBConstants.tableProductionCompare,
+        where: 'batch_id = ?',
+        whereArgs: [batchId],
+      );
+
+      await txn.update(
+        DBConstants.tableProductionBatches,
+        {'deleted': 1, 'updated_at': now},
+        where: 'id = ?',
+        whereArgs: [batchId],
+      );
+
+      await txn.insert(DBConstants.tableAuditLogs, {
+        'id': _uuid.v4(),
+        'user_id': batch.createdBy,
+        'module': 'الإنتاج',
+        'action': 'حذف إنتاج',
+        'old_data': 'دفعة ${batch.productionNumber} - صالح ${batch.goodPieces}',
+        'new_data': null,
+        'device_id': batch.deviceId,
+        'created_at': now,
+      });
+    });
   }
 }
