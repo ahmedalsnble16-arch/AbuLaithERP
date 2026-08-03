@@ -33,6 +33,7 @@ class DatabaseHelper {
   }
 
   Future<void> _onCreate(Database db, int version) async {
+    // ============ الجداول الأساسية ============
     await db.execute('''
       CREATE TABLE ${DBConstants.tableRoles} (
         id TEXT PRIMARY KEY,
@@ -457,6 +458,74 @@ class DatabaseHelper {
       )
     ''');
 
+    // ============ الجداول الجديدة للموزعين ============
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS ${DBConstants.tableDistributorLoadItems} (
+        id TEXT PRIMARY KEY,
+        load_id TEXT NOT NULL,
+        product_id TEXT NOT NULL,
+        quantity INTEGER NOT NULL,
+        unit_price REAL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (load_id) REFERENCES ${DBConstants.tableDistributorLoads}(id),
+        FOREIGN KEY (product_id) REFERENCES ${DBConstants.tableProducts}(id)
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS ${DBConstants.tableDistributorDamagePrices} (
+        id TEXT PRIMARY KEY,
+        distributor_id TEXT NOT NULL,
+        damage_type TEXT NOT NULL,
+        price_per_piece REAL NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(distributor_id, damage_type),
+        FOREIGN KEY (distributor_id) REFERENCES ${DBConstants.tableDistributors}(id)
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS ${DBConstants.tableDistributorLoadReturns} (
+        id TEXT PRIMARY KEY,
+        distributor_id TEXT NOT NULL,
+        load_id TEXT,
+        product_id TEXT NOT NULL,
+        boxes INTEGER DEFAULT 0,
+        pieces INTEGER DEFAULT 0,
+        total_pieces INTEGER DEFAULT 0,
+        unit_price REAL DEFAULT 0,
+        total_value REAL DEFAULT 0,
+        return_date TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        created_by TEXT,
+        device_id TEXT,
+        sync_status TEXT DEFAULT 'Pending',
+        FOREIGN KEY (distributor_id) REFERENCES ${DBConstants.tableDistributors}(id),
+        FOREIGN KEY (load_id) REFERENCES ${DBConstants.tableDistributorLoads}(id),
+        FOREIGN KEY (product_id) REFERENCES ${DBConstants.tableProducts}(id)
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS ${DBConstants.tableDistributorLoadDamage} (
+        id TEXT PRIMARY KEY,
+        distributor_id TEXT NOT NULL,
+        load_id TEXT,
+        damage_type TEXT NOT NULL,
+        pieces INTEGER DEFAULT 0,
+        price_per_piece REAL DEFAULT 0,
+        total_value REAL DEFAULT 0,
+        damage_date TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        created_by TEXT,
+        device_id TEXT,
+        sync_status TEXT DEFAULT 'Pending',
+        FOREIGN KEY (distributor_id) REFERENCES ${DBConstants.tableDistributors}(id),
+        FOREIGN KEY (load_id) REFERENCES ${DBConstants.tableDistributorLoads}(id)
+      )
+    ''');
+
     await db.execute('''
       CREATE TABLE ${DBConstants.tableWorkers} (
         id TEXT PRIMARY KEY,
@@ -652,7 +721,75 @@ class DatabaseHelper {
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
-    // سيتم إضافة تحديثات قاعدة البيانات هنا في الإصدارات المستقبلية
+    if (oldVersion < 2) {
+      // إنشاء الجداول الجديدة التي أضيفت في الإصدار 2
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS ${DBConstants.tableDistributorLoadItems} (
+          id TEXT PRIMARY KEY,
+          load_id TEXT NOT NULL,
+          product_id TEXT NOT NULL,
+          quantity INTEGER NOT NULL,
+          unit_price REAL DEFAULT 0,
+          created_at TEXT NOT NULL,
+          FOREIGN KEY (load_id) REFERENCES ${DBConstants.tableDistributorLoads}(id),
+          FOREIGN KEY (product_id) REFERENCES ${DBConstants.tableProducts}(id)
+        )
+      ''');
+
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS ${DBConstants.tableDistributorDamagePrices} (
+          id TEXT PRIMARY KEY,
+          distributor_id TEXT NOT NULL,
+          damage_type TEXT NOT NULL,
+          price_per_piece REAL NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          UNIQUE(distributor_id, damage_type),
+          FOREIGN KEY (distributor_id) REFERENCES ${DBConstants.tableDistributors}(id)
+        )
+      ''');
+
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS ${DBConstants.tableDistributorLoadReturns} (
+          id TEXT PRIMARY KEY,
+          distributor_id TEXT NOT NULL,
+          load_id TEXT,
+          product_id TEXT NOT NULL,
+          boxes INTEGER DEFAULT 0,
+          pieces INTEGER DEFAULT 0,
+          total_pieces INTEGER DEFAULT 0,
+          unit_price REAL DEFAULT 0,
+          total_value REAL DEFAULT 0,
+          return_date TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          created_by TEXT,
+          device_id TEXT,
+          sync_status TEXT DEFAULT 'Pending',
+          FOREIGN KEY (distributor_id) REFERENCES ${DBConstants.tableDistributors}(id),
+          FOREIGN KEY (load_id) REFERENCES ${DBConstants.tableDistributorLoads}(id),
+          FOREIGN KEY (product_id) REFERENCES ${DBConstants.tableProducts}(id)
+        )
+      ''');
+
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS ${DBConstants.tableDistributorLoadDamage} (
+          id TEXT PRIMARY KEY,
+          distributor_id TEXT NOT NULL,
+          load_id TEXT,
+          damage_type TEXT NOT NULL,
+          pieces INTEGER DEFAULT 0,
+          price_per_piece REAL DEFAULT 0,
+          total_value REAL DEFAULT 0,
+          damage_date TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          created_by TEXT,
+          device_id TEXT,
+          sync_status TEXT DEFAULT 'Pending',
+          FOREIGN KEY (distributor_id) REFERENCES ${DBConstants.tableDistributors}(id),
+          FOREIGN KEY (load_id) REFERENCES ${DBConstants.tableDistributorLoads}(id)
+        )
+      ''');
+    }
   }
 
   Future<void> _seedData(Database db) async {
@@ -720,7 +857,7 @@ class DatabaseHelper {
       'id': 'user_admin_001',
       'full_name': 'مدير النظام',
       'username': 'admin',
-      'password_hash': 'admin123', // سيتم تشفيره لاحقاً
+      'password_hash': 'admin123',
       'role_id': 'role_admin',
       'phone': '770000000',
       'active': 1,
