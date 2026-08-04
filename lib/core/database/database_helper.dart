@@ -526,6 +526,82 @@ class DatabaseHelper {
       )
     ''');
 
+    // ============ جداول المعرض الجديدة ============
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS showroom_daily_entries (
+        id TEXT PRIMARY KEY,
+        business_date TEXT NOT NULL,
+        product_id TEXT NOT NULL,
+        load_boxes INTEGER DEFAULT 0,
+        load_pieces INTEGER DEFAULT 0,
+        load_total_pieces INTEGER DEFAULT 0,
+        return_boxes INTEGER DEFAULT 0,
+        return_pieces INTEGER DEFAULT 0,
+        return_total_pieces INTEGER DEFAULT 0,
+        load_value REAL DEFAULT 0,
+        return_value REAL DEFAULT 0,
+        net_value REAL DEFAULT 0,
+        remaining_boxes INTEGER DEFAULT 0,
+        remaining_pieces INTEGER DEFAULT 0,
+        remaining_value REAL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (product_id) REFERENCES ${DBConstants.tableProducts}(id)
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS showroom_daily_account (
+        id TEXT PRIMARY KEY,
+        business_date TEXT NOT NULL UNIQUE,
+        previous_remaining_value REAL DEFAULT 0,
+        total_load_value REAL DEFAULT 0,
+        total_return_value REAL DEFAULT 0,
+        net_goods_value REAL DEFAULT 0,
+        total_worker_expenses REAL DEFAULT 0,
+        total_worker_advances REAL DEFAULT 0,
+        total_daily_expenses REAL DEFAULT 0,
+        other_income REAL DEFAULT 0,
+        showroom_expense REAL DEFAULT 0,
+        total_due REAL DEFAULT 0,
+        cash_received REAL DEFAULT 0,
+        cash_confirmed INTEGER DEFAULT 0,
+        confirmed_by TEXT,
+        result_amount REAL DEFAULT 0,
+        result_status TEXT,
+        closed INTEGER DEFAULT 0,
+        closed_by TEXT,
+        closed_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS showroom_daily_expenses (
+        id TEXT PRIMARY KEY,
+        business_date TEXT NOT NULL,
+        amount REAL NOT NULL,
+        details TEXT,
+        created_at TEXT NOT NULL,
+        created_by TEXT,
+        device_id TEXT,
+        FOREIGN KEY (business_date) REFERENCES showroom_daily_account(business_date)
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS showroom_khat (
+        id TEXT PRIMARY KEY,
+        business_date TEXT NOT NULL,
+        worker_name TEXT NOT NULL,
+        amount REAL NOT NULL,
+        created_at TEXT NOT NULL,
+        created_by TEXT,
+        device_id TEXT
+      )
+    ''');
+
     // ============ جدول المتبقي اليومي ============
     await db.execute('''
       CREATE TABLE IF NOT EXISTS ${DBConstants.tableDailyRemaining} (
@@ -822,6 +898,82 @@ class DatabaseHelper {
           device_id TEXT,
           UNIQUE(product_id, remaining_date),
           FOREIGN KEY (product_id) REFERENCES ${DBConstants.tableProducts}(id)
+        )
+      ''');
+    }
+    if (oldVersion < 4) {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS showroom_daily_entries (
+          id TEXT PRIMARY KEY,
+          business_date TEXT NOT NULL,
+          product_id TEXT NOT NULL,
+          load_boxes INTEGER DEFAULT 0,
+          load_pieces INTEGER DEFAULT 0,
+          load_total_pieces INTEGER DEFAULT 0,
+          return_boxes INTEGER DEFAULT 0,
+          return_pieces INTEGER DEFAULT 0,
+          return_total_pieces INTEGER DEFAULT 0,
+          load_value REAL DEFAULT 0,
+          return_value REAL DEFAULT 0,
+          net_value REAL DEFAULT 0,
+          remaining_boxes INTEGER DEFAULT 0,
+          remaining_pieces INTEGER DEFAULT 0,
+          remaining_value REAL DEFAULT 0,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY (product_id) REFERENCES ${DBConstants.tableProducts}(id)
+        )
+      ''');
+
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS showroom_daily_account (
+          id TEXT PRIMARY KEY,
+          business_date TEXT NOT NULL UNIQUE,
+          previous_remaining_value REAL DEFAULT 0,
+          total_load_value REAL DEFAULT 0,
+          total_return_value REAL DEFAULT 0,
+          net_goods_value REAL DEFAULT 0,
+          total_worker_expenses REAL DEFAULT 0,
+          total_worker_advances REAL DEFAULT 0,
+          total_daily_expenses REAL DEFAULT 0,
+          other_income REAL DEFAULT 0,
+          showroom_expense REAL DEFAULT 0,
+          total_due REAL DEFAULT 0,
+          cash_received REAL DEFAULT 0,
+          cash_confirmed INTEGER DEFAULT 0,
+          confirmed_by TEXT,
+          result_amount REAL DEFAULT 0,
+          result_status TEXT,
+          closed INTEGER DEFAULT 0,
+          closed_by TEXT,
+          closed_at TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+      ''');
+
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS showroom_daily_expenses (
+          id TEXT PRIMARY KEY,
+          business_date TEXT NOT NULL,
+          amount REAL NOT NULL,
+          details TEXT,
+          created_at TEXT NOT NULL,
+          created_by TEXT,
+          device_id TEXT,
+          FOREIGN KEY (business_date) REFERENCES showroom_daily_account(business_date)
+        )
+      ''');
+
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS showroom_khat (
+          id TEXT PRIMARY KEY,
+          business_date TEXT NOT NULL,
+          worker_name TEXT NOT NULL,
+          amount REAL NOT NULL,
+          created_at TEXT NOT NULL,
+          created_by TEXT,
+          device_id TEXT
         )
       ''');
     }
