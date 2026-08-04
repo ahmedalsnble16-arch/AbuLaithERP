@@ -28,6 +28,7 @@ class DBConstants {
   static const String tableDistributorDamagePrices = 'distributor_damage_prices';
   static const String tableDistributorLoadReturns = 'distributor_load_returns';
   static const String tableDistributorLoadDamage = 'distributor_load_damage';
+  static const String tableDailyRemaining = 'daily_remaining';
   static const String tableWorkers = 'workers';
   static const String tableWorkerAccounts = 'worker_accounts';
   static const String tableTreasury = 'treasury';
