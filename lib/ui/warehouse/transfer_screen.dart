@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:sqflite/sqflite.dart';
 import '../../core/database/database_helper.dart';
 import '../../data/models/product.dart';
 import '../../data/repositories/product_repository.dart';
@@ -43,32 +44,105 @@ class _TransferScreenState extends State<TransferScreen> {
       return;
     }
 
-    final success = await _stockRepo.deductStock(_selectedProduct!.id, qty);
-    if (!mounted) return;
-    if (!success) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('الكمية غير متوفرة')));
-      return;
-    }
+    try {
+      final db = await DatabaseHelper().database;
+      
+      // تنفيذ التحويل داخل معاملة واحدة
+      await db.transaction((txn) async {
+        // 1. التحقق من الكمية المتاحة في المخزون
+        final stockList = await txn.query(
+          'stock',
+          where: 'product_id = ?',
+          whereArgs: [_selectedProduct!.id],
+        );
+        
+        if (stockList.isEmpty) {
+          throw Exception('المنتج غير موجود في المخزون');
+        }
+        
+        final currentQty = stockList.first['quantity_pieces'] as int? ?? 0;
+        if (currentQty < qty) {
+          throw Exception('الكمية غير متوفرة في المخزون (المتاح: $currentQty)');
+        }
 
-    final db = await DatabaseHelper().database;
-    final showroomStock = await db.query('showroom_stock', where: 'product_id = ?', whereArgs: [_selectedProduct!.id]);
-    if (showroomStock.isEmpty) {
-      await db.insert('showroom_stock', {
-        'id': DateTime.now().millisecondsSinceEpoch.toString(),
-        'product_id': _selectedProduct!.id,
-        'quantity': qty,
-        'retail_price': _selectedProduct!.retailPrice,
-        'created_at': DateTime.now().toIso8601String(),
-        'updated_at': DateTime.now().toIso8601String(),
+        // 2. خصم الكمية من المخزون
+        await txn.update(
+          'stock',
+          {
+            'quantity_pieces': currentQty - qty,
+            'updated_at': DateTime.now().toIso8601String(),
+          },
+          where: 'product_id = ?',
+          whereArgs: [_selectedProduct!.id],
+        );
+
+        // 3. تسجيل حركة المخزون (الخصم)
+        await txn.insert('stock_movements', {
+          'id': DateTime.now().millisecondsSinceEpoch.toString(),
+          'product_id': _selectedProduct!.id,
+          'movement_type': 'تحويل للمعرض',
+          'quantity': -qty,
+          'reference_id': DateTime.now().millisecondsSinceEpoch.toString(),
+          'reference_type': 'transfer',
+          'notes': 'تحويل إلى المعرض',
+          'created_at': DateTime.now().toIso8601String(),
+          'created_by': 'admin',
+          'device_id': 'mobile',
+          'sync_status': 'Pending',
+        });
+
+        // 4. إضافة الكمية إلى المعرض
+        final showroomStock = await txn.query(
+          'showroom_stock',
+          where: 'product_id = ?',
+          whereArgs: [_selectedProduct!.id],
+        );
+        
+        if (showroomStock.isEmpty) {
+          await txn.insert('showroom_stock', {
+            'id': DateTime.now().millisecondsSinceEpoch.toString(),
+            'product_id': _selectedProduct!.id,
+            'quantity': qty,
+            'retail_price': _selectedProduct!.retailPrice,
+            'transfer_date': DateTime.now().toIso8601String(),
+            'created_at': DateTime.now().toIso8601String(),
+            'updated_at': DateTime.now().toIso8601String(),
+          });
+        } else {
+          final currentShowroom = showroomStock.first['quantity'] as int? ?? 0;
+          await txn.update(
+            'showroom_stock',
+            {
+              'quantity': currentShowroom + qty,
+              'updated_at': DateTime.now().toIso8601String(),
+            },
+            where: 'product_id = ?',
+            whereArgs: [_selectedProduct!.id],
+          );
+        }
+
+        // 5. سجل التدقيق
+        await txn.insert('audit_logs', {
+          'id': DateTime.now().millisecondsSinceEpoch.toString(),
+          'user_id': 'admin',
+          'module': 'المخزن',
+          'action': 'تحويل للمعرض',
+          'old_data': null,
+          'new_data': 'تحويل ${_selectedProduct!.name} - كمية $qty قطعة',
+          'device_id': 'mobile',
+          'created_at': DateTime.now().toIso8601String(),
+        });
       });
-    } else {
-      final current = showroomStock.first['quantity'] as int? ?? 0;
-      await db.update('showroom_stock', {'quantity': current + qty, 'updated_at': DateTime.now().toIso8601String()}, where: 'product_id = ?', whereArgs: [_selectedProduct!.id]);
-    }
 
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم التحويل إلى المعرض')));
-    Navigator.pop(context);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم التحويل إلى المعرض')));
+      Navigator.pop(context);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('خطأ: $e'), backgroundColor: Colors.red),
+      );
+    }
   }
 
   @override
