@@ -1,14 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:sqflite/sqflite.dart';
 import '../../config/theme.dart';
-import '../../core/constants/db_constants.dart';
 import '../../core/database/database_helper.dart';
-import '../../data/repositories/product_repository.dart';
-import '../../data/repositories/worker_repository.dart';
-import '../../data/repositories/showroom_repository.dart';
-import '../../data/repositories/settings_repository.dart';
 import '../../data/models/product.dart';
 import '../../data/models/worker.dart';
-import '../../data/models/showroom_daily_entry.dart';
+import '../../data/repositories/product_repository.dart';
+import '../../data/repositories/worker_repository.dart';
 
 class ShowroomScreen extends StatefulWidget {
   const ShowroomScreen({super.key});
@@ -21,18 +18,10 @@ class _ShowroomScreenState extends State<ShowroomScreen>
     with SingleTickerProviderStateMixin {
   final ProductRepository _productRepo = ProductRepository();
   final WorkerRepository _workerRepo = WorkerRepository();
-  final ShowroomRepository _showroomRepo = ShowroomRepository();
-  final SettingsRepository _settingsRepo = SettingsRepository();
 
-  // البيانات الأساسية
   List<Product> _products = [];
   List<Worker> _workers = [];
-  List<ShowroomDailyEntry> _dailyEntries = [];
-  List<Map<String, dynamic>> _dailyExpenses = [];
-  List<Map<String, dynamic>> _khatEntries = [];
-  Map<String, dynamic>? _dailyAccount;
 
-  // التاريخ
   String _businessDate = DateTime.now().toIso8601String().substring(0, 10);
   final TextEditingController _dateController = TextEditingController();
 
@@ -62,6 +51,11 @@ class _ShowroomScreenState extends State<ShowroomScreen>
 
   bool _isLoading = true;
   late TabController _tabController;
+
+  // بيانات محملة
+  double _prevRemaining = 0.0;
+  List<Map<String, dynamic>> _dailyExpenses = [];
+  List<Map<String, dynamic>> _khatEntries = [];
 
   @override
   void initState() {
@@ -94,11 +88,10 @@ class _ShowroomScreenState extends State<ShowroomScreen>
   Future<void> _loadAllData() async {
     setState(() => _isLoading = true);
     try {
-      // المنتجات
+      final db = await DatabaseHelper().database;
+
       final products = await _productRepo.getAll();
       _products = products.where((p) => p.active).toList();
-
-      // متحكمات المنتجات
       for (var p in _products) {
         _loadBoxesCtrl[p.id] ??= TextEditingController(text: '0');
         _loadPiecesCtrl[p.id] ??= TextEditingController(text: '0');
@@ -106,57 +99,42 @@ class _ShowroomScreenState extends State<ShowroomScreen>
         _returnPiecesCtrl[p.id] ??= TextEditingController(text: '0');
       }
 
-      // العمال
       _workers = await _workerRepo.getAll();
       for (var w in _workers) {
         _workerReceived[w.id] ??= false;
         _advanceCtrl[w.id] ??= TextEditingController(text: '0');
       }
 
-      // الحركات اليومية
-      _dailyEntries = await _showroomRepo.getDailyEntries(_businessDate);
+      // رصيد مرحلة من اليوم السابق
+      final yesterday = DateTime.parse(_businessDate).subtract(const Duration(days: 1)).toIso8601String().substring(0, 10);
+      final prevAccounts = await db.query('showroom_daily_account', where: 'business_date = ?', whereArgs: [yesterday]);
+      _prevRemaining = prevAccounts.isNotEmpty ? (prevAccounts.first['result'] as num?)?.toDouble() ?? 0.0 : 0.0;
 
-      // الخرج اليومي
-      final db = await DatabaseHelper().database;
       _dailyExpenses = await db.query('showroom_daily_expenses', where: 'business_date = ?', whereArgs: [_businessDate]);
+      _expenseAmountCtrl.clear();
+      _expenseDetailsCtrl.clear();
       if (_dailyExpenses.isEmpty) {
         _dailyExpenses = [{'amount': 0, 'details': ''}];
-        _expenseAmountCtrl.add(TextEditingController(text: '0'));
-        _expenseDetailsCtrl.add(TextEditingController());
-      } else {
-        for (var exp in _dailyExpenses) {
-          _expenseAmountCtrl.add(TextEditingController(text: '${exp['amount'] ?? 0}'));
-          _expenseDetailsCtrl.add(TextEditingController(text: exp['details'] ?? ''));
-        }
+      }
+      for (var exp in _dailyExpenses) {
+        _expenseAmountCtrl.add(TextEditingController(text: '${exp['amount'] ?? 0}'));
+        _expenseDetailsCtrl.add(TextEditingController(text: exp['details'] ?? ''));
       }
 
-      // قات العمال
       _khatEntries = await db.query('showroom_khat', where: 'business_date = ?', whereArgs: [_businessDate]);
+      _khatNameCtrl.clear();
+      _khatAmountCtrl.clear();
       if (_khatEntries.isEmpty) {
         _khatEntries = [{'worker_name': '', 'amount': 0}];
-        _khatNameCtrl.add(TextEditingController());
-        _khatAmountCtrl.add(TextEditingController(text: '0'));
-      } else {
-        for (var k in _khatEntries) {
-          _khatNameCtrl.add(TextEditingController(text: k['worker_name'] ?? ''));
-          _khatAmountCtrl.add(TextEditingController(text: '${k['amount'] ?? 0}'));
-        }
       }
-
-      // الحساب اليومي
-      final accounts = await db.query('showroom_daily_account', where: 'business_date = ?', whereArgs: [_businessDate]);
-      if (accounts.isNotEmpty) {
-        _dailyAccount = accounts.first;
-        _showroomExpenseCtrl.text = '${_dailyAccount?['showroom_expense'] ?? 0}';
-        _cashReceivedCtrl.text = '${_dailyAccount?['cash_received'] ?? 0}';
+      for (var k in _khatEntries) {
+        _khatNameCtrl.add(TextEditingController(text: k['worker_name'] ?? ''));
+        _khatAmountCtrl.add(TextEditingController(text: '${k['amount'] ?? 0}'));
       }
-    } catch (e) {
-      // ignore
-    }
+    } catch (_) {}
     setState(() => _isLoading = false);
   }
 
-  // ============ دوال الحساب ============
   int _getBoxSize(String productId) {
     final product = _products.firstWhere((p) => p.id == productId, orElse: () => Product(id: '', name: '', createdAt: '', updatedAt: ''));
     return product.piecesPerBox;
@@ -165,13 +143,6 @@ class _ShowroomScreenState extends State<ShowroomScreen>
   double _getRetailPrice(String productId) {
     final product = _products.firstWhere((p) => p.id == productId, orElse: () => Product(id: '', name: '', createdAt: '', updatedAt: ''));
     return product.retailPrice;
-  }
-
-  String _piecesToDisplay(int pieces, int boxSize) {
-    if (boxSize <= 0) return '$pieces';
-    final boxes = pieces ~/ boxSize;
-    final remaining = pieces % boxSize;
-    return '$boxes.$remaining';
   }
 
   int _getLoadPieces(String productId) {
@@ -202,49 +173,39 @@ class _ShowroomScreenState extends State<ShowroomScreen>
   double get _totalDailyExpenses => _expenseAmountCtrl.fold(0, (sum, c) => sum + (double.tryParse(c.text) ?? 0));
   double get _totalKhat => _khatAmountCtrl.fold(0, (sum, c) => sum + (double.tryParse(c.text) ?? 0));
 
-  // ============ حفظ البيانات ============
-  Future<void> _saveDailyEntries() async {
-    setState(() => _isLoading = true);
-    try {
-      for (var p in _products) {
-        await _showroomRepo.saveEntry(
-          businessDate: _businessDate,
-          productId: p.id,
-          loadBoxes: int.tryParse(_loadBoxesCtrl[p.id]?.text ?? '0') ?? 0,
-          loadPieces: int.tryParse(_loadPiecesCtrl[p.id]?.text ?? '0') ?? 0,
-          returnBoxes: int.tryParse(_returnBoxesCtrl[p.id]?.text ?? '0') ?? 0,
-          returnPieces: int.tryParse(_returnPiecesCtrl[p.id]?.text ?? '0') ?? 0,
-          boxSize: p.piecesPerBox,
-          retailPrice: p.retailPrice,
-        );
-      }
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم حفظ الحركات اليومية'), backgroundColor: AppTheme.successColor));
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('خطأ: $e'), backgroundColor: AppTheme.errorColor));
-    }
-    setState(() => _isLoading = false);
-  }
-
   Future<void> _saveDailyAccount() async {
     final db = await DatabaseHelper().database;
     final now = DatabaseHelper.now;
-    await db.insert('showroom_daily_account', {
-      'id': DateTime.now().millisecondsSinceEpoch.toString(),
-      'business_date': _businessDate,
-      'total_load_value': _totalLoadValue,
-      'total_return_value': _totalReturnValue,
-      'total_worker_expenses': _totalWorkerExpenses,
-      'total_worker_advances': _totalAdvances,
-      'total_daily_expenses': _totalDailyExpenses,
-      'showroom_expense': double.tryParse(_showroomExpenseCtrl.text) ?? 0,
-      'cash_received': double.tryParse(_cashReceivedCtrl.text) ?? 0,
-      'created_at': now,
-      'updated_at': now,
-    }, conflictAlgorithm: ConflictAlgorithm.replace);
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم حفظ الحساب اليومي'), backgroundColor: AppTheme.successColor));
+    final showroomExpense = double.tryParse(_showroomExpenseCtrl.text) ?? 0;
+    final cashReceived = double.tryParse(_cashReceivedCtrl.text) ?? 0;
+    final otherIncome = double.tryParse(_otherIncomeAmountCtrl.text) ?? 0;
+    final totalDue = _prevRemaining + _totalLoadValue - _totalReturnValue + _totalWorkerExpenses + _totalAdvances + _totalDailyExpenses + showroomExpense - otherIncome;
+    final result = totalDue - cashReceived;
+
+    await db.insert(
+      'showroom_daily_account',
+      {
+        'id': DateTime.now().millisecondsSinceEpoch.toString(),
+        'business_date': _businessDate,
+        'total_load_value': _totalLoadValue,
+        'total_return_value': _totalReturnValue,
+        'total_worker_expenses': _totalWorkerExpenses,
+        'total_worker_advances': _totalAdvances,
+        'total_daily_expenses': _totalDailyExpenses,
+        'showroom_expense': showroomExpense,
+        'cash_received': cashReceived,
+        'other_income': otherIncome,
+        'result': result,
+        'created_at': now,
+        'updated_at': now,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم حفظ الحساب اليومي'), backgroundColor: AppTheme.successColor));
+    }
   }
 
-  // ============ واجهة المستخدم ============
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -269,7 +230,6 @@ class _ShowroomScreenState extends State<ShowroomScreen>
           ? const Center(child: CircularProgressIndicator())
           : Column(
               children: [
-                // شريط التاريخ
                 Padding(
                   padding: const EdgeInsets.all(8.0),
                   child: Row(
@@ -290,7 +250,6 @@ class _ShowroomScreenState extends State<ShowroomScreen>
                     ],
                   ),
                 ),
-                // التبويبات
                 Expanded(
                   child: TabBarView(
                     controller: _tabController,
@@ -308,20 +267,17 @@ class _ShowroomScreenState extends State<ShowroomScreen>
     );
   }
 
-  // ============ التبويب 1: السحبيات والمرتجعات ============
   Widget _buildTab1() {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(8),
       child: Column(
         children: [
-          // ملخص
           Row(children: [
             _summaryCard('السحبيات', _totalLoadValue, AppTheme.errorColor),
             _summaryCard('المرتجعات', _totalReturnValue, AppTheme.successColor),
             _summaryCard('الصافي', _totalLoadValue - _totalReturnValue, AppTheme.primaryColor),
           ]),
           const SizedBox(height: 8),
-          // جدول الحركة
           Card(
             child: Padding(
               padding: const EdgeInsets.all(8),
@@ -356,14 +312,11 @@ class _ShowroomScreenState extends State<ShowroomScreen>
               ),
             ),
           ),
-          const SizedBox(height: 16),
-          ElevatedButton.icon(onPressed: _saveDailyEntries, icon: const Icon(Icons.save), label: const Text('حفظ الحركات اليومية')),
         ],
       ),
     );
   }
 
-  // ============ التبويب 2: العمال ============
   Widget _buildTab2() {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(8),
@@ -402,7 +355,6 @@ class _ShowroomScreenState extends State<ShowroomScreen>
     );
   }
 
-  // ============ التبويب 3: الخرج اليومي ============
   Widget _buildTab3() {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(8),
@@ -425,20 +377,18 @@ class _ShowroomScreenState extends State<ShowroomScreen>
     );
   }
 
-  // ============ التبويب 4: كشف الحساب ============
   Widget _buildTab4() {
-    final prevRemaining = (_dailyAccount?['previous_remaining_value'] as num?)?.toDouble() ?? 0;
     final showroomExpense = double.tryParse(_showroomExpenseCtrl.text) ?? 0;
     final cashReceived = double.tryParse(_cashReceivedCtrl.text) ?? 0;
     final otherIncome = double.tryParse(_otherIncomeAmountCtrl.text) ?? 0;
-    final totalDue = prevRemaining + _totalLoadValue - _totalReturnValue + _totalWorkerExpenses + _totalAdvances + _totalDailyExpenses + showroomExpense - otherIncome;
+    final totalDue = _prevRemaining + _totalLoadValue - _totalReturnValue + _totalWorkerExpenses + _totalAdvances + _totalDailyExpenses + showroomExpense - otherIncome;
     final result = totalDue - cashReceived;
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(8),
       child: Column(
         children: [
-          Card(child: ListTile(title: const Text('المدور عليه من اليوم السابق'), trailing: Text('$prevRemaining'))),
+          Card(child: ListTile(title: const Text('المدور عليه من اليوم السابق'), trailing: Text('${_prevRemaining.toStringAsFixed(0)}'))),
           Card(child: ListTile(title: const Text('قيمة السحبيات'), trailing: Text('${_totalLoadValue.toStringAsFixed(0)}'))),
           Card(child: ListTile(title: const Text('قيمة المرتجعات'), trailing: Text('- ${_totalReturnValue.toStringAsFixed(0)}'))),
           Card(child: ListTile(title: const Text('مصاريف العمال'), trailing: Text('${_totalWorkerExpenses.toStringAsFixed(0)}'))),
@@ -461,7 +411,6 @@ class _ShowroomScreenState extends State<ShowroomScreen>
     );
   }
 
-  // ============ التبويب 5: قات العمال ============
   Widget _buildTab5() {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(8),
