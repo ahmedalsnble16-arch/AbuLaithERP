@@ -526,6 +526,24 @@ class DatabaseHelper {
       )
     ''');
 
+    // ============ جدول المتبقي اليومي ============
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS ${DBConstants.tableDailyRemaining} (
+        id TEXT PRIMARY KEY,
+        product_id TEXT NOT NULL,
+        remaining_date TEXT NOT NULL,
+        quantity INTEGER NOT NULL DEFAULT 0,
+        boxes INTEGER DEFAULT 0,
+        pieces INTEGER DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        created_by TEXT,
+        device_id TEXT,
+        UNIQUE(product_id, remaining_date),
+        FOREIGN KEY (product_id) REFERENCES ${DBConstants.tableProducts}(id)
+      )
+    ''');
+
     await db.execute('''
       CREATE TABLE ${DBConstants.tableWorkers} (
         id TEXT PRIMARY KEY,
@@ -722,7 +740,6 @@ class DatabaseHelper {
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
     if (oldVersion < 2) {
-      // إنشاء الجداول الجديدة التي أضيفت في الإصدار 2
       await db.execute('''
         CREATE TABLE IF NOT EXISTS ${DBConstants.tableDistributorLoadItems} (
           id TEXT PRIMARY KEY,
@@ -790,12 +807,29 @@ class DatabaseHelper {
         )
       ''');
     }
+    if (oldVersion < 3) {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS ${DBConstants.tableDailyRemaining} (
+          id TEXT PRIMARY KEY,
+          product_id TEXT NOT NULL,
+          remaining_date TEXT NOT NULL,
+          quantity INTEGER NOT NULL DEFAULT 0,
+          boxes INTEGER DEFAULT 0,
+          pieces INTEGER DEFAULT 0,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          created_by TEXT,
+          device_id TEXT,
+          UNIQUE(product_id, remaining_date),
+          FOREIGN KEY (product_id) REFERENCES ${DBConstants.tableProducts}(id)
+        )
+      ''');
+    }
   }
 
   Future<void> _seedData(Database db) async {
     final now = DateTime.now().toIso8601String();
 
-    // إدراج الأدوار الأساسية
     await db.insert(DBConstants.tableRoles, {
       'id': 'role_admin',
       'role_name': 'المدير العام',
@@ -852,7 +886,6 @@ class DatabaseHelper {
       'updated_at': now,
     });
 
-    // إدراج المستخدم الافتراضي (مدير عام)
     await db.insert(DBConstants.tableUsers, {
       'id': 'user_admin_001',
       'full_name': 'مدير النظام',
@@ -866,7 +899,6 @@ class DatabaseHelper {
       'sync_status': DBConstants.syncPending,
     });
 
-    // إدراج الإعدادات الافتراضية
     final defaultSettings = {
       'company_name': 'معمل أبو ليث',
       'company_activity': 'إنتاج الكيك والنواشف',
@@ -886,6 +918,5 @@ class DatabaseHelper {
     }
   }
 
-  // دالة مساعدة للحصول على الوقت الحالي كنص
   static String get now => DateTime.now().toIso8601String();
 }
