@@ -8,11 +8,6 @@ class TreasuryService {
     return await _repository.getAll(dateFilter: dateFilter);
   }
 
-  /// إضافة حركة مالية (مع دعم المعاملات الخارجية)
-  Future<String> addTransaction(Treasury transaction, {dynamic txn}) async {
-    return await _repository.addTransaction(transaction, txn: txn);
-  }
-
   Future<String> addReceipt({
     required double amount,
     String? sourceModule,
@@ -21,23 +16,14 @@ class TreasuryService {
     String? createdBy,
     dynamic txn,
   }) async {
-    final now = DateTime.now().toIso8601String();
-    final transaction = Treasury(
-      id: '',
-      transactionNumber: '',
-      transactionType: 'قبض',
+    return await _repository.addReceipt(
       amount: amount,
       sourceModule: sourceModule,
       sourceId: sourceId,
       note: note,
-      transactionDate: DateTime.now().toIso8601String().substring(0, 10),
-      status: 'معتمدة',
-      createdAt: now,
-      updatedAt: now,
       createdBy: createdBy,
-      deviceId: 'mobile',
+      txn: txn,
     );
-    return await _repository.addTransaction(transaction, txn: txn);
   }
 
   Future<String> addPayment({
@@ -48,23 +34,14 @@ class TreasuryService {
     String? createdBy,
     dynamic txn,
   }) async {
-    final now = DateTime.now().toIso8601String();
-    final transaction = Treasury(
-      id: '',
-      transactionNumber: '',
-      transactionType: 'صرف',
+    return await _repository.addPayment(
       amount: amount,
       sourceModule: sourceModule,
       sourceId: sourceId,
       note: note,
-      transactionDate: DateTime.now().toIso8601String().substring(0, 10),
-      status: 'معتمدة',
-      createdAt: now,
-      updatedAt: now,
       createdBy: createdBy,
-      deviceId: 'mobile',
+      txn: txn,
     );
-    return await _repository.addTransaction(transaction, txn: txn);
   }
 
   Future<double> getCurrentBalance() async {
