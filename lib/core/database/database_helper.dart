@@ -1,5 +1,5 @@
 // lib/core/database/database_helper.dart
-import 'package:sqflite/sqflite.dart';
+import 'package0package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import '../../config/app_config.dart';
 import '../../core/constants/db_constants.dart';
@@ -643,6 +643,28 @@ class DatabaseHelper {
       )
     ''');
 
+    // ============ جداول العمال الجديدة (الحضور والمصاريف اليومية) ============
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS worker_attendance (
+        id TEXT PRIMARY KEY,
+        worker_id TEXT NOT NULL,
+        date TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        UNIQUE(worker_id, date)
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS worker_daily_expenses (
+        id TEXT PRIMARY KEY,
+        worker_id TEXT NOT NULL,
+        date TEXT NOT NULL,
+        amount REAL DEFAULT 0,
+        details TEXT,
+        created_at TEXT NOT NULL
+      )
+    ''');
+
     await db.execute('''
       CREATE TABLE ${DBConstants.tableWorkerAccounts} (
         id TEXT PRIMARY KEY,
@@ -994,6 +1016,28 @@ class DatabaseHelper {
       ''');
       await db.execute('''
         ALTER TABLE ${DBConstants.tableWorkers} ADD COLUMN card_image TEXT
+      ''');
+    }
+    if (oldVersion < 6) {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS worker_attendance (
+          id TEXT PRIMARY KEY,
+          worker_id TEXT NOT NULL,
+          date TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          UNIQUE(worker_id, date)
+        )
+      ''');
+
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS worker_daily_expenses (
+          id TEXT PRIMARY KEY,
+          worker_id TEXT NOT NULL,
+          date TEXT NOT NULL,
+          amount REAL DEFAULT 0,
+          details TEXT,
+          created_at TEXT NOT NULL
+        )
       ''');
     }
   }
