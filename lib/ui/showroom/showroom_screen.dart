@@ -6,6 +6,7 @@ import '../../data/models/product.dart';
 import '../../data/models/worker.dart';
 import '../../data/repositories/product_repository.dart';
 import '../../data/repositories/worker_repository.dart';
+import '../../data/repositories/treasury_repository.dart';
 
 class ShowroomScreen extends StatefulWidget {
   const ShowroomScreen({super.key});
@@ -156,12 +157,12 @@ class _ShowroomScreenState extends State<ShowroomScreen>
       await txn.delete('showroom_daily_expenses', where: 'business_date = ?', whereArgs: [_businessDate]);
       for (var row in _expenseRows) {
         final amount = double.tryParse(row.amountCtrl.text) ?? 0;
-        final details = row.detailsCtrl.text;
+        if (amount <= 0 && row.detailsCtrl.text.trim().isEmpty) continue;
         await txn.insert('showroom_daily_expenses', {
           'id': row.id ?? DateTime.now().millisecondsSinceEpoch.toString(),
           'business_date': _businessDate,
           'amount': amount,
-          'details': details,
+          'details': row.detailsCtrl.text,
           'created_at': now,
           'updated_at': now,
         });
@@ -181,12 +182,12 @@ class _ShowroomScreenState extends State<ShowroomScreen>
       await txn.delete('showroom_khat', where: 'business_date = ?', whereArgs: [_businessDate]);
       for (var row in _khatRows) {
         final amount = double.tryParse(row.amountCtrl.text) ?? 0;
-        final details = row.detailsCtrl.text;
+        if (amount <= 0 && row.detailsCtrl.text.trim().isEmpty) continue;
         await txn.insert('showroom_khat', {
           'id': row.id ?? DateTime.now().millisecondsSinceEpoch.toString(),
           'business_date': _businessDate,
           'amount': amount,
-          'details': details,
+          'details': row.detailsCtrl.text,
           'created_at': now,
           'updated_at': now,
         });
@@ -197,6 +198,60 @@ class _ShowroomScreenState extends State<ShowroomScreen>
     }
     await _loadKhat();
     setState(() {});
+  }
+
+  Future<void> _saveWorkersAndAdvances() async {
+    final db = await DatabaseHelper().database;
+    final now = DatabaseHelper.now;
+    
+    await db.transaction((txn) async {
+      // حفظ استلام العمال لمصاريفهم
+      await txn.delete('showroom_worker_received', where: 'business_date = ?', whereArgs: [_businessDate]);
+      for (var w in _workers) {
+        if (_workerReceived[w.id] == true) {
+          await txn.insert('showroom_worker_received', {
+            'id': DateTime.now().millisecondsSinceEpoch.toString(),
+            'business_date': _businessDate,
+            'worker_id': w.id,
+            'worker_name': w.name,
+            'salary': w.salary,
+            'created_at': now,
+          });
+        }
+      }
+
+      // حفظ البرانيات (السلف) للعمال
+      await txn.delete('showroom_worker_advances', where: 'business_date = ?', whereArgs: [_businessDate]);
+      for (var w in _workers) {
+        final advance = double.tryParse(_advanceCtrl[w.id]?.text ?? '') ?? 0;
+        if (advance > 0) {
+          await txn.insert('showroom_worker_advances', {
+            'id': DateTime.now().millisecondsSinceEpoch.toString(),
+            'business_date': _businessDate,
+            'worker_id': w.id,
+            'worker_name': w.name,
+            'amount': advance,
+            'created_at': now,
+          });
+
+          // تسجيل الحركة في حساب العامل
+          await txn.insert('worker_accounts', {
+            'id': DateTime.now().millisecondsSinceEpoch.toString(),
+            'worker_id': w.id,
+            'transaction_type': 'برانية',
+            'amount': advance,
+            'description': 'برانية من المعرض بتاريخ $_businessDate',
+            'transaction_date': _businessDate,
+            'created_at': now,
+            'sync_status': 'Pending',
+          });
+        }
+      }
+    });
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم حفظ بيانات العمال والبرانيات'), backgroundColor: AppTheme.successColor));
+    }
   }
 
   // ---------- حسابات السحبيات والعمال ----------
@@ -418,6 +473,12 @@ class _ShowroomScreenState extends State<ShowroomScreen>
               ),
             ),
           ),
+          const SizedBox(height: 16),
+          ElevatedButton.icon(
+            onPressed: _saveWorkersAndAdvances,
+            icon: const Icon(Icons.save),
+            label: const Text('حفظ بيانات العمال والبرانيات'),
+          ),
         ],
       ),
     );
@@ -481,7 +542,7 @@ class _ShowroomScreenState extends State<ShowroomScreen>
           ElevatedButton.icon(
             onPressed: _saveExpenses,
             icon: const Icon(Icons.save),
-            label: const Text('حفظ الكشف'),
+            label: const Text('حفظ كشف الخرج اليومي'),
           ),
         ],
       ),
@@ -581,7 +642,7 @@ class _ShowroomScreenState extends State<ShowroomScreen>
           ElevatedButton.icon(
             onPressed: _saveKhat,
             icon: const Icon(Icons.save),
-            label: const Text('حفظ الكشف'),
+            label: const Text('حفظ كشف قات العمال'),
           ),
         ],
       ),
