@@ -1,16 +1,22 @@
 import 'package:flutter/material.dart';
-import 'package:uuid/uuid.dart';
 import '../../config/theme.dart';
+import '../../core/constants/db_constants.dart';
 import '../../core/database/database_helper.dart';
 
 class WorkerAccountScreen extends StatefulWidget {
   final String workerId;
   final String workerName;
+  final double dailySalary;
+  final double dailyExpense;
+  final bool isActive;
 
   const WorkerAccountScreen({
     super.key,
     required this.workerId,
     required this.workerName,
+    this.dailySalary = 0,
+    this.dailyExpense = 0,
+    this.isActive = true,
   });
 
   @override
@@ -18,371 +24,266 @@ class WorkerAccountScreen extends StatefulWidget {
 }
 
 class _WorkerAccountScreenState extends State<WorkerAccountScreen> {
-  // بيانات العامل
-  Map<String, dynamic>? _workerData;
-  double _dailySalary = 0;
-  double _dailyExpense = 0;
-
-  // الشهر والسنة المحددين
-  int _selectedYear = DateTime.now().year;
-  int _selectedMonth = DateTime.now().month;
-
-  // أيام الشهر مع بياناتها
-  List<_DayData> _days = [];
+  String _selectedMonth = DateTime.now().toIso8601String().substring(0, 7);
+  List<Map<String, dynamic>> _dailyRows = [];
+  double _totalActiveDays = 0;
+  double _totalSalary = 0;
+  double _totalExpenses = 0;
+  double _totalBraneyat = 0;
+  double _totalAdditions = 0;
   bool _isLoading = true;
 
   @override
   void initState() {
     super.initState();
-    _loadAllData();
+    _loadMonthData();
   }
 
-  Future<void> _loadAllData() async {
+  Future<void> _loadMonthData() async {
     setState(() => _isLoading = true);
     final db = await DatabaseHelper().database;
+    final year = int.parse(_selectedMonth.split('-')[0]);
+    final month = int.parse(_selectedMonth.split('-')[1]);
+    final daysInMonth = DateTime(year, month + 1, 0).day;
 
-    // 1. جلب بيانات العامل
-    final workers = await db.query(
-      'workers',
-      where: 'id = ?',
-      whereArgs: [widget.workerId],
+    // جلب أيام النشاط
+    final attendances = await db.query(
+      'worker_attendance',
+      where: 'worker_id = ? AND strftime("%Y-%m", date) = ?',
+      whereArgs: [widget.workerId, _selectedMonth],
     );
-    if (workers.isNotEmpty) {
-      _workerData = workers.first;
-      _dailySalary = (_workerData?['daily_salary'] as num?)?.toDouble() ??
-          (_workerData?['salary'] as num?)?.toDouble() ??
-          0;
-      _dailyExpense =
-          (_workerData?['daily_expense'] as num?)?.toDouble() ?? 0;
+    final activeDays = attendances.map((a) => a['date'] as String).toSet();
+
+    // جلب المصاريف من المعرض
+    final expenses = await db.rawQuery('''
+      SELECT date, COALESCE(SUM(amount), 0) as total
+      FROM worker_daily_expenses
+      WHERE worker_id = ? AND strftime("%Y-%m", date) = ?
+      GROUP BY date
+    ''', [widget.workerId, _selectedMonth]);
+    final expenseMap = {for (var e in expenses) e['date'] as String: (e['total'] as num?)?.toDouble() ?? 0};
+
+    // جلب البرانيات
+    final braneyat = await db.rawQuery('''
+      SELECT transaction_date, COALESCE(SUM(amount), 0) as total
+      FROM ${DBConstants.tableWorkerAccounts}
+      WHERE worker_id = ? AND transaction_type = 'برانية' AND strftime("%Y-%m", transaction_date) = ?
+      GROUP BY transaction_date
+    ''', [widget.workerId, _selectedMonth]);
+    final braneyatMap = {for (var b in braneyat) b['transaction_date'] as String: (b['total'] as num?)?.toDouble() ?? 0};
+
+    // جلب الإضافات
+    final additions = await db.rawQuery('''
+      SELECT transaction_date, amount, description
+      FROM ${DBConstants.tableWorkerAccounts}
+      WHERE worker_id = ? AND transaction_type IN ('مكافأة', 'خصم', 'مستحق') AND strftime("%Y-%m", transaction_date) = ?
+    ''', [widget.workerId, _selectedMonth]);
+    final additionsMap = <String, List<Map<String, dynamic>>>{};
+    for (var a in additions) {
+      final date = a['transaction_date'] as String;
+      additionsMap[date] ??= [];
+      additionsMap[date]!.add(a);
     }
 
-    // 2. بناء أيام الشهر
-    final daysInMonth =
-        DateTime(_selectedYear, _selectedMonth + 1, 0).day;
-    _days = [];
+    // بناء الصفوف
+    final rows = <Map<String, dynamic>>[];
+    int totalDays = 0;
+    double totalSalary = 0, totalExpenses = 0, totalBraneyat = 0, totalAdditions = 0;
 
-    for (int day = 1; day <= daysInMonth; day++) {
-      final date =
-          '$_selectedYear-${_selectedMonth.toString().padLeft(2, '0')}-${day.toString().padLeft(2, '0')}';
+    for (var d = 1; d <= daysInMonth; d++) {
+      final date = '$year-${month.toString().padLeft(2, '0')}-${d.toString().padLeft(2, '0')}';
+      final isActive = activeDays.contains(date);
+      final dayExpense = expenseMap[date] ?? 0;
+      final dayBraneyat = braneyatMap[date] ?? 0;
+      final dayAdditions = additionsMap[date] ?? [];
+      final additionsTotal = dayAdditions.fold(0.0, (sum, item) => sum + ((item['amount'] as num?)?.toDouble() ?? 0));
 
-      // 2a. النشاط والمصروف من المعرض
-      bool isActive = false;
-      double showroomExpense = 0;
-      double showroomAdvance = 0;
-
-      // جدول showroom_worker_daily يربط العامل بالتاريخ في المعرض
-      final showroomEntries = await db.query(
-        'showroom_worker_daily',
-        where: 'worker_id = ? AND business_date = ?',
-        whereArgs: [widget.workerId, date],
-      );
-      if (showroomEntries.isNotEmpty) {
-        final entry = showroomEntries.first;
-        isActive = entry['is_active'] == 1;
-        showroomExpense =
-            (entry['daily_expense'] as num?)?.toDouble() ?? _dailyExpense;
-        showroomAdvance =
-            (entry['advance_amount'] as num?)?.toDouble() ?? 0;
+      if (isActive) {
+        totalDays++;
+        totalSalary += widget.dailySalary;
       }
+      totalExpenses += dayExpense;
+      totalBraneyat += dayBraneyat;
+      totalAdditions += additionsTotal;
 
-      // 2b. الإضافات والملحقات المسجلة لهذا اليوم
-      final extras = await db.query(
-        'worker_daily_extras',
-        where: 'worker_id = ? AND entry_date = ?',
-        whereArgs: [widget.workerId, date],
-      );
-
-      _days.add(_DayData(
-        date: date,
-        dayNumber: day,
-        isActive: isActive,
-        dailyExpense: showroomExpense,
-        advanceAmount: showroomAdvance,
-        extras: extras
-            .map((e) => _ExtraEntry(
-                  id: e['id']?.toString(),
-                  amount:
-                      (e['amount'] as num?)?.toDouble() ?? 0,
-                  details: e['details'] ?? '',
-                ))
-            .toList(),
-      ));
+      rows.add({
+        'date': date,
+        'day': d,
+        'isActive': isActive,
+        'expense': dayExpense,
+        'braneyat': dayBraneyat,
+        'additions': dayAdditions,
+        'additionsTotal': additionsTotal,
+      });
     }
 
-    setState(() => _isLoading = false);
+    setState(() {
+      _dailyRows = rows;
+      _totalActiveDays = totalDays.toDouble();
+      _totalSalary = totalSalary;
+      _totalExpenses = totalExpenses;
+      _totalBraneyat = totalBraneyat;
+      _totalAdditions = totalAdditions;
+      _isLoading = false;
+    });
   }
 
-  Future<void> _saveDay(_DayData day) async {
+  Future<void> _toggleDay(int index) async {
+    final row = _dailyRows[index];
+    final date = row['date'] as String;
+    final currentlyActive = row['isActive'] as bool;
     final db = await DatabaseHelper().database;
-    final now = DateTime.now().toIso8601String();
 
-    // حفظ أو تحديث showroom_worker_daily
-    final existing = await db.query(
-      'showroom_worker_daily',
-      where: 'worker_id = ? AND business_date = ?',
-      whereArgs: [widget.workerId, day.date],
-    );
-
-    if (existing.isEmpty) {
-      await db.insert('showroom_worker_daily', {
-        'id': const Uuid().v4(),
-        'worker_id': widget.workerId,
-        'business_date': day.date,
-        'is_active': day.isActive ? 1 : 0,
-        'daily_expense': day.isActive ? _dailyExpense : 0,
-        'advance_amount': day.advanceAmount,
-        'created_at': now,
-        'updated_at': now,
-      });
+    if (currentlyActive) {
+      await db.delete('worker_attendance', where: 'worker_id = ? AND date = ?', whereArgs: [widget.workerId, date]);
     } else {
-      await db.update(
-        'showroom_worker_daily',
-        {
-          'is_active': day.isActive ? 1 : 0,
-          'daily_expense': day.isActive ? _dailyExpense : 0,
-          'advance_amount': day.advanceAmount,
-          'updated_at': now,
-        },
-        where: 'worker_id = ? AND business_date = ?',
-        whereArgs: [widget.workerId, day.date],
-      );
-    }
-
-    // حفظ الإضافات والملحقات
-    await db.delete(
-      'worker_daily_extras',
-      where: 'worker_id = ? AND entry_date = ?',
-      whereArgs: [widget.workerId, day.date],
-    );
-    for (var extra in day.extras) {
-      await db.insert('worker_daily_extras', {
-        'id': extra.id ?? const Uuid().v4(),
+      await db.insert('worker_attendance', {
+        'id': DateTime.now().millisecondsSinceEpoch.toString(),
         'worker_id': widget.workerId,
-        'entry_date': day.date,
-        'amount': extra.amount,
-        'details': extra.details,
-        'created_at': now,
+        'date': date,
+        'created_at': DateTime.now().toIso8601String(),
       });
     }
+    _loadMonthData();
+  }
 
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('تم حفظ بيانات اليوم'),
-          backgroundColor: AppTheme.successColor,
+  Future<void> _addAddition(String date) async {
+    final amountCtrl = TextEditingController();
+    final detailsCtrl = TextEditingController();
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('إضافة ملحق'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(controller: amountCtrl, decoration: const InputDecoration(labelText: 'المبلغ', hintText: '0'), keyboardType: TextInputType.number),
+            TextField(controller: detailsCtrl, decoration: const InputDecoration(labelText: 'التفاصيل')),
+          ],
         ),
-      );
-    }
-  }
-
-  void _addExtra(_DayData day) {
-    setState(() {
-      day.extras.add(_ExtraEntry(amount: 0, details: ''));
-    });
-  }
-
-  void _removeExtra(_DayData day, int index) {
-    setState(() {
-      day.extras.removeAt(index);
-    });
-  }
-
-  // ============ الحسابات ============
-  int get _totalActiveDays =>
-      _days.where((d) => d.isActive).length;
-  double get _totalSalary =>
-      _totalActiveDays * _dailySalary;
-  double get _totalExpenses =>
-      _days.where((d) => d.isActive).fold(0, (sum, d) => sum + d.dailyExpense);
-  double get _totalAdvances =>
-      _days.fold(0, (sum, d) => sum + d.advanceAmount);
-  double get _totalExtras =>
-      _days.fold(0, (sum, d) => sum + d.extras.fold(0, (s, e) => s + e.amount));
-  double get _netSalary =>
-      _totalSalary - _totalExpenses - _totalAdvances - _totalExtras;
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text('كشف حساب: ${widget.workerName}'),
         actions: [
-          // اختيار الشهر والسنة
-          IconButton(
-            icon: const Icon(Icons.calendar_month),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء')),
+          ElevatedButton(
             onPressed: () async {
-              final picked = await showDatePicker(
-                context: context,
-                initialDate: DateTime(_selectedYear, _selectedMonth),
-                firstDate: DateTime(2020),
-                lastDate: DateTime(2030),
-                helpText: 'اختر الشهر',
-              );
-              if (picked != null) {
-                setState(() {
-                  _selectedYear = picked.year;
-                  _selectedMonth = picked.month;
-                });
-                _loadAllData();
-              }
+              final amount = double.tryParse(amountCtrl.text) ?? 0;
+              if (amount <= 0) return;
+              final db = await DatabaseHelper().database;
+              await db.insert(DBConstants.tableWorkerAccounts, {
+                'id': DateTime.now().millisecondsSinceEpoch.toString(),
+                'worker_id': widget.workerId,
+                'transaction_type': 'مستحق',
+                'amount': amount,
+                'description': detailsCtrl.text.isNotEmpty ? detailsCtrl.text : 'إضافة',
+                'transaction_date': date,
+                'created_at': DateTime.now().toIso8601String(),
+              });
+              Navigator.pop(ctx, true);
             },
+            child: const Text('حفظ'),
           ),
         ],
       ),
+    );
+    if (result == true) _loadMonthData();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final netSalary = _totalSalary - _totalExpenses - _totalBraneyat - _totalAdditions;
+
+    return Scaffold(
+      appBar: AppBar(title: Text('كشف حساب: ${widget.workerName}')),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : SingleChildScrollView(
               padding: const EdgeInsets.all(8),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // محدد الشهر
+                  Row(
+                    children: [
+                      IconButton(icon: const Icon(Icons.chevron_right), onPressed: () {
+                        final parts = _selectedMonth.split('-');
+                        final d = DateTime(int.parse(parts[0]), int.parse(parts[1]) - 1, 1);
+                        setState(() => _selectedMonth = d.toIso8601String().substring(0, 7));
+                        _loadMonthData();
+                      }),
+                      Expanded(child: Center(child: Text(_selectedMonth, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)))),
+                      IconButton(icon: const Icon(Icons.chevron_left), onPressed: () {
+                        final parts = _selectedMonth.split('-');
+                        final d = DateTime(int.parse(parts[0]), int.parse(parts[1]) + 1, 1);
+                        setState(() => _selectedMonth = d.toIso8601String().substring(0, 7));
+                        _loadMonthData();
+                      }),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
                   // معلومات العامل
                   Card(
                     child: Padding(
-                      padding: const EdgeInsets.all(12),
+                      padding: const EdgeInsets.all(8),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.spaceAround,
                         children: [
-                          _infoItem('الأجر اليومي', '$_dailySalary'),
-                          _infoItem('المصروف اليومي', '$_dailyExpense'),
-                          _infoItem('أيام النشاط', '$_totalActiveDays'),
+                          _infoCard('الأجر اليومي', '${widget.dailySalary}'),
+                          _infoCard('المصروف اليومي', '${widget.dailyExpense}'),
+                          _infoCard('الحالة', widget.isActive ? 'نشط' : 'غير نشط'),
                         ],
                       ),
                     ),
                   ),
-                  const SizedBox(height: 12),
-                  // عنوان الشهر
-                  Center(
-                    child: Text(
-                      '${_selectedMonth}/${_selectedYear}',
-                      style: const TextStyle(
-                          fontSize: 18, fontWeight: FontWeight.bold),
-                    ),
-                  ),
                   const SizedBox(height: 8),
                   // جدول الأيام
-                  SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: DataTable(
-                      columns: const [
-                        DataColumn(label: Text('اليوم')),
-                        DataColumn(label: Text('نشط')),
-                        DataColumn(label: Text('المصروف')),
-                        DataColumn(label: Text('البرانيات')),
-                        DataColumn(label: Text('ملحقات')),
-                        DataColumn(label: Text('حفظ')),
-                      ],
-                      rows: _days.map((day) {
-                        return DataRow(cells: [
-                          DataCell(Text('${day.dayNumber}')),
-                          DataCell(
-                            Checkbox(
-                              value: day.isActive,
-                              onChanged: (v) {
-                                setState(() => day.isActive = v ?? false);
-                                if (day.isActive) {
-                                  day.dailyExpense = _dailyExpense;
-                                } else {
-                                  day.dailyExpense = 0;
-                                }
-                              },
+                  Card(
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: DataTable(
+                        columns: const [
+                          DataColumn(label: Text('اليوم')),
+                          DataColumn(label: Text('نشط')),
+                          DataColumn(label: Text('مصروف')),
+                          DataColumn(label: Text('برانيات')),
+                          DataColumn(label: Text('إضافات')),
+                          DataColumn(label: Text('إجراء')),
+                        ],
+                        rows: List.generate(_dailyRows.length, (index) {
+                          final row = _dailyRows[index];
+                          return DataRow(cells: [
+                            DataCell(Text('${row['day']}')),
+                            DataCell(
+                              Checkbox(
+                                value: row['isActive'] as bool,
+                                onChanged: (_) => _toggleDay(index),
+                              ),
                             ),
-                          ),
-                          DataCell(Text('${day.dailyExpense}')),
-                          DataCell(SizedBox(
-                            width: 80,
-                            child: TextField(
-                              keyboardType: TextInputType.number,
-                              controller: TextEditingController(
-                                  text: '${day.advanceAmount}'),
-                              onChanged: (v) {
-                                day.advanceAmount =
-                                    double.tryParse(v) ?? 0;
-                              },
-                            ),
-                          )),
-                          DataCell(
-                            Column(
-                              children: [
-                                ...day.extras.asMap().entries.map((e) {
-                                  final i = e.key;
-                                  final extra = e.value;
-                                  return Row(
-                                    children: [
-                                      SizedBox(
-                                        width: 60,
-                                        child: TextField(
-                                          keyboardType:
-                                              TextInputType.number,
-                                          controller:
-                                              TextEditingController(
-                                                  text:
-                                                      '${extra.amount}'),
-                                          onChanged: (v) {
-                                            extra.amount =
-                                                double.tryParse(v) ??
-                                                    0;
-                                          },
-                                        ),
-                                      ),
-                                      IconButton(
-                                        icon: const Icon(Icons.delete,
-                                            size: 16,
-                                            color: AppTheme.errorColor),
-                                        onPressed: () =>
-                                            _removeExtra(day, i),
-                                      ),
-                                    ],
-                                  );
-                                }),
-                                TextButton.icon(
-                                  onPressed: () => _addExtra(day),
-                                  icon: const Icon(Icons.add, size: 16),
-                                  label: const Text('إضافة',
-                                      style:
-                                          TextStyle(fontSize: 11)),
-                                ),
-                              ],
-                            ),
-                          ),
-                          DataCell(
-                            IconButton(
-                              icon: const Icon(Icons.save,
-                                  color: AppTheme.primaryColor),
-                              onPressed: () => _saveDay(day),
-                            ),
-                          ),
-                        ]);
-                      }).toList(),
+                            DataCell(Text('${row['expense']}')),
+                            DataCell(Text('${row['braneyat']}')),
+                            DataCell(Text('${row['additionsTotal']}')),
+                            DataCell(IconButton(
+                              icon: const Icon(Icons.add_circle, color: AppTheme.primaryColor),
+                              onPressed: () => _addAddition(row['date'] as String),
+                            )),
+                          ]);
+                        }),
+                      ),
                     ),
                   ),
                   const SizedBox(height: 16),
-                  // ملخص الحساب الشهري
+                  // ملخص الحساب
                   Card(
                     color: AppTheme.primaryColor.withAlpha(15),
                     child: Padding(
                       padding: const EdgeInsets.all(16),
                       child: Column(
                         children: [
-                          _summaryRow(
-                              'إجمالي أيام النشاط', '$_totalActiveDays يوم'),
-                          _summaryRow(
-                              'إجمالي الراتب', '$_totalSalary'),
-                          _summaryRow(
-                              'إجمالي المصاريف', '- $_totalExpenses'),
-                          _summaryRow(
-                              'إجمالي البرانيات', '- $_totalAdvances'),
-                          _summaryRow(
-                              'إجمالي الملحقات', '- $_totalExtras'),
+                          _summaryRow('إجمالي أيام النشاط', '${_totalActiveDays.toInt()} يوم'),
+                          _summaryRow('إجمالي الراتب', '${_totalSalary.toStringAsFixed(0)}'),
+                          _summaryRow('إجمالي المصاريف', '- ${_totalExpenses.toStringAsFixed(0)}'),
+                          _summaryRow('إجمالي البرانيات', '- ${_totalBraneyat.toStringAsFixed(0)}'),
+                          _summaryRow('إجمالي الإضافات', '- ${_totalAdditions.toStringAsFixed(0)}'),
                           const Divider(),
-                          _summaryRow(
-                            '💰 صافي حساب العامل',
-                            '$_netSalary',
-                            isBold: true,
-                            color: _netSalary >= 0
-                                ? AppTheme.successColor
-                                : AppTheme.errorColor,
-                          ),
+                          _summaryRow('💰 صافي الحساب', '${netSalary.toStringAsFixed(0)}', isBold: true, color: netSalary >= 0 ? AppTheme.successColor : AppTheme.errorColor),
                         ],
                       ),
                     ),
@@ -393,63 +294,25 @@ class _WorkerAccountScreenState extends State<WorkerAccountScreen> {
     );
   }
 
-  Widget _infoItem(String label, String value) {
+  Widget _infoCard(String label, String value) {
     return Column(
       children: [
         Text(label, style: const TextStyle(fontSize: 11, color: AppTheme.textSecondaryColor)),
-        Text(value, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+        Text(value, style: const TextStyle(fontWeight: FontWeight.bold)),
       ],
     );
   }
 
-  Widget _summaryRow(String label, String value,
-      {bool isBold = false, Color? color}) {
+  Widget _summaryRow(String label, String value, {bool isBold = false, Color? color}) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label,
-              style: TextStyle(
-                  fontWeight: isBold ? FontWeight.bold : FontWeight.normal)),
-          Text(value,
-              style: TextStyle(
-                  fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
-                  fontSize: isBold ? 18 : 14,
-                  color: color)),
+          Text(label),
+          Text(value, style: TextStyle(fontWeight: isBold ? FontWeight.bold : FontWeight.normal, fontSize: isBold ? 18 : 14, color: color)),
         ],
       ),
     );
   }
-}
-
-// ============ كائنات مساعدة ============
-class _DayData {
-  final String date;
-  final int dayNumber;
-  bool isActive;
-  double dailyExpense;
-  double advanceAmount;
-  final List<_ExtraEntry> extras;
-
-  _DayData({
-    required this.date,
-    required this.dayNumber,
-    this.isActive = false,
-    this.dailyExpense = 0,
-    this.advanceAmount = 0,
-    List<_ExtraEntry>? extras,
-  }) : extras = extras ?? [];
-}
-
-class _ExtraEntry {
-  String? id;
-  double amount;
-  String details;
-
-  _ExtraEntry({
-    this.id,
-    this.amount = 0,
-    this.details = '',
-  });
 }
