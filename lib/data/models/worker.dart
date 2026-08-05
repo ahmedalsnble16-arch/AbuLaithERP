@@ -5,6 +5,9 @@ class Worker {
   final String? phone;
   final double salary;
   final double dailySalary;
+  final double dailyExpense;
+  final String? cardNumber;
+  final String? cardImage;
   final String? hireDate;
   final bool active;
   final String createdAt;
@@ -21,6 +24,9 @@ class Worker {
     this.phone,
     this.salary = 0,
     this.dailySalary = 0,
+    this.dailyExpense = 0,
+    this.cardNumber,
+    this.cardImage,
     this.hireDate,
     this.active = true,
     required this.createdAt,
@@ -39,6 +45,9 @@ class Worker {
       phone: map['phone'],
       salary: (map['salary'] ?? 0).toDouble(),
       dailySalary: (map['daily_salary'] ?? map['salary'] ?? 0).toDouble(),
+      dailyExpense: (map['daily_expense'] ?? 0).toDouble(),
+      cardNumber: map['card_number'],
+      cardImage: map['card_image'],
       hireDate: map['hire_date'],
       active: map['active'] == 1,
       createdAt: map['created_at'] ?? '',
@@ -58,6 +67,9 @@ class Worker {
       'phone': phone,
       'salary': salary,
       'daily_salary': dailySalary,
+      'daily_expense': dailyExpense,
+      'card_number': cardNumber,
+      'card_image': cardImage,
       'hire_date': hireDate,
       'active': active ? 1 : 0,
       'created_at': createdAt,
@@ -70,23 +82,27 @@ class Worker {
   }
 
   Worker copyWith({
-    String? id,
     String? name,
     String? job,
     String? phone,
     double? salary,
     double? dailySalary,
-    String? hireDate,
+    double? dailyExpense,
+    String? cardNumber,
+    String? cardImage,
     bool? active,
   }) {
     return Worker(
-      id: id ?? this.id,
+      id: id,
       name: name ?? this.name,
       job: job ?? this.job,
       phone: phone ?? this.phone,
       salary: salary ?? this.salary,
       dailySalary: dailySalary ?? this.dailySalary,
-      hireDate: hireDate ?? this.hireDate,
+      dailyExpense: dailyExpense ?? this.dailyExpense,
+      cardNumber: cardNumber ?? this.cardNumber,
+      cardImage: cardImage ?? this.cardImage,
+      hireDate: hireDate,
       active: active ?? this.active,
       createdAt: createdAt,
       updatedAt: DateTime.now().toIso8601String(),
