@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:sqflite/sqflite.dart';
+import 'package:uuid/uuid.dart';
 import '../../config/theme.dart';
 import '../../core/database/database_helper.dart';
 import '../../data/models/product.dart';
@@ -96,40 +97,37 @@ class _ShowroomScreenState extends State<ShowroomScreen>
       }
 
       _workers = await _workerRepo.getAll();
+      
+      // استيراد حالة العمال من showroom_worker_daily
       for (var w in _workers) {
-        _workerReceived[w.id] ??= false;
-        _advanceCtrl[w.id] ??= TextEditingController(text: '0');
+        final savedData = await db.query(
+          'showroom_worker_daily',
+          where: 'worker_id = ? AND business_date = ?',
+          whereArgs: [w.id, _businessDate],
+        );
+        if (savedData.isNotEmpty) {
+          final data = savedData.first;
+          _workerReceived[w.id] = data['is_active'] == 1;
+          _advanceCtrl[w.id] = TextEditingController(text: '${data['advance_amount'] ?? 0}');
+        } else {
+          _workerReceived[w.id] ??= false;
+          _advanceCtrl[w.id] ??= TextEditingController(text: '0');
+        }
       }
 
       // رصيد مرحل من اليوم السابق
-      final yesterday = DateTime.parse(_businessDate)
-          .subtract(const Duration(days: 1))
-          .toIso8601String()
-          .substring(0, 10);
-      final prevAccounts = await db.query(
-        'showroom_daily_account',
-        where: 'business_date = ?',
-        whereArgs: [yesterday],
-      );
-      _prevRemaining = prevAccounts.isNotEmpty
-          ? (prevAccounts.first['result'] as num?)?.toDouble() ?? 0.0
-          : 0.0;
+      final yesterday = DateTime.parse(_businessDate).subtract(const Duration(days: 1)).toIso8601String().substring(0, 10);
+      final prevAccounts = await db.query('showroom_daily_account', where: 'business_date = ?', whereArgs: [yesterday]);
+      _prevRemaining = prevAccounts.isNotEmpty ? (prevAccounts.first['result'] as num?)?.toDouble() ?? 0.0 : 0.0;
 
-      // تحميل الخرج اليومي
       await _loadExpenses(db);
-
-      // تحميل قات العمال
       await _loadKhat(db);
     } catch (_) {}
     setState(() => _isLoading = false);
   }
 
   Future<void> _loadExpenses(Database db) async {
-    final rows = await db.query(
-      'showroom_daily_expenses',
-      where: 'business_date = ?',
-      whereArgs: [_businessDate],
-    );
+    final rows = await db.query('showroom_daily_expenses', where: 'business_date = ?', whereArgs: [_businessDate]);
     _expenseRows.clear();
     if (rows.isEmpty) {
       _expenseRows.add(_ExpenseRow());
@@ -145,11 +143,7 @@ class _ShowroomScreenState extends State<ShowroomScreen>
   }
 
   Future<void> _loadKhat(Database db) async {
-    final rows = await db.query(
-      'showroom_khat',
-      where: 'business_date = ?',
-      whereArgs: [_businessDate],
-    );
+    final rows = await db.query('showroom_khat', where: 'business_date = ?', whereArgs: [_businessDate]);
     _khatRows.clear();
     if (rows.isEmpty) {
       _khatRows.add(_KhatRow());
@@ -164,15 +158,51 @@ class _ShowroomScreenState extends State<ShowroomScreen>
     }
   }
 
+  Future<void> _saveWorkersData() async {
+    final db = await DatabaseHelper().database;
+    final now = DateTime.now().toIso8601String();
+    try {
+      await db.transaction((txn) async {
+        for (var w in _workers) {
+          final isActive = _workerReceived[w.id] == true;
+          final dailyExpense = w.dailyExpense ?? w.salary ?? 0;
+          final advanceAmount = double.tryParse(_advanceCtrl[w.id]?.text ?? '0') ?? 0;
+
+          await txn.insert(
+            'showroom_worker_daily',
+            {
+              'id': const Uuid().v4(),
+              'worker_id': w.id,
+              'business_date': _businessDate,
+              'is_active': isActive ? 1 : 0,
+              'daily_expense': isActive ? dailyExpense : 0,
+              'advance_amount': advanceAmount,
+              'created_at': now,
+              'updated_at': now,
+            },
+            conflictAlgorithm: ConflictAlgorithm.replace,
+          );
+        }
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('تم حفظ بيانات العمال'), backgroundColor: AppTheme.successColor),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('خطأ: $e'), backgroundColor: AppTheme.errorColor),
+        );
+      }
+    }
+  }
+
   Future<void> _saveExpenses() async {
     final db = await DatabaseHelper().database;
-    final now = DatabaseHelper.now;
+    final now = DateTime.now().toIso8601String();
     await db.transaction((txn) async {
-      await txn.delete(
-        'showroom_daily_expenses',
-        where: 'business_date = ?',
-        whereArgs: [_businessDate],
-      );
+      await txn.delete('showroom_daily_expenses', where: 'business_date = ?', whereArgs: [_businessDate]);
       for (var row in _expenseRows) {
         final amount = double.tryParse(row.amountCtrl.text) ?? 0;
         final details = row.detailsCtrl.text;
@@ -188,23 +218,16 @@ class _ShowroomScreenState extends State<ShowroomScreen>
     });
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('تم حفظ كشف الخرج اليومي'),
-          backgroundColor: AppTheme.successColor,
-        ),
+        const SnackBar(content: Text('تم حفظ كشف الخرج اليومي'), backgroundColor: AppTheme.successColor),
       );
     }
   }
 
   Future<void> _saveKhat() async {
     final db = await DatabaseHelper().database;
-    final now = DatabaseHelper.now;
+    final now = DateTime.now().toIso8601String();
     await db.transaction((txn) async {
-      await txn.delete(
-        'showroom_khat',
-        where: 'business_date = ?',
-        whereArgs: [_businessDate],
-      );
+      await txn.delete('showroom_khat', where: 'business_date = ?', whereArgs: [_businessDate]);
       for (var row in _khatRows) {
         final amount = double.tryParse(row.amountCtrl.text) ?? 0;
         final details = row.detailsCtrl.text;
@@ -220,28 +243,19 @@ class _ShowroomScreenState extends State<ShowroomScreen>
     });
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('تم حفظ كشف قات العمال'),
-          backgroundColor: AppTheme.successColor,
-        ),
+        const SnackBar(content: Text('تم حفظ كشف قات العمال'), backgroundColor: AppTheme.successColor),
       );
     }
   }
 
   // ---------- حسابات السحبيات والعمال ----------
   int _getBoxSize(String productId) {
-    final product = _products.firstWhere(
-      (p) => p.id == productId,
-      orElse: () => Product(id: '', name: '', createdAt: '', updatedAt: ''),
-    );
+    final product = _products.firstWhere((p) => p.id == productId, orElse: () => Product(id: '', name: '', createdAt: '', updatedAt: ''));
     return product.piecesPerBox;
   }
 
   double _getRetailPrice(String productId) {
-    final product = _products.firstWhere(
-      (p) => p.id == productId,
-      orElse: () => Product(id: '', name: '', createdAt: '', updatedAt: ''),
-    );
+    final product = _products.firstWhere((p) => p.id == productId, orElse: () => Product(id: '', name: '', createdAt: '', updatedAt: ''));
     return product.retailPrice;
   }
 
@@ -257,54 +271,29 @@ class _ShowroomScreenState extends State<ShowroomScreen>
     return (boxes * _getBoxSize(productId)) + pieces;
   }
 
-  double _getLoadValue(String productId) =>
-      _getLoadPieces(productId) * _getRetailPrice(productId);
-  double _getReturnValue(String productId) =>
-      _getReturnPieces(productId) * _getRetailPrice(productId);
+  double _getLoadValue(String productId) => _getLoadPieces(productId) * _getRetailPrice(productId);
+  double _getReturnValue(String productId) => _getReturnPieces(productId) * _getRetailPrice(productId);
 
-  double get _totalLoadValue =>
-      _products.fold(0, (sum, p) => sum + _getLoadValue(p.id));
-  double get _totalReturnValue =>
-      _products.fold(0, (sum, p) => sum + _getReturnValue(p.id));
+  double get _totalLoadValue => _products.fold(0, (sum, p) => sum + _getLoadValue(p.id));
+  double get _totalReturnValue => _products.fold(0, (sum, p) => sum + _getReturnValue(p.id));
   double get _totalWorkerExpenses {
     double total = 0;
     for (var w in _workers) {
-      if (_workerReceived[w.id] == true) total += w.salary;
+      if (_workerReceived[w.id] == true) total += w.dailyExpense ?? w.salary ?? 0;
     }
     return total;
   }
-
-  double get _totalAdvances => _workers.fold(
-        0,
-        (sum, w) =>
-            sum + (double.tryParse(_advanceCtrl[w.id]?.text ?? '0') ?? 0),
-      );
-  double get _totalDailyExpenses => _expenseRows.fold(
-        0,
-        (sum, row) => sum + (double.tryParse(row.amountCtrl.text) ?? 0),
-      );
-  double get _totalKhat => _khatRows.fold(
-        0,
-        (sum, row) => sum + (double.tryParse(row.amountCtrl.text) ?? 0),
-      );
+  double get _totalAdvances => _workers.fold(0, (sum, w) => sum + (double.tryParse(_advanceCtrl[w.id]?.text ?? '0') ?? 0));
+  double get _totalDailyExpenses => _expenseRows.fold(0, (sum, row) => sum + (double.tryParse(row.amountCtrl.text) ?? 0));
+  double get _totalKhat => _khatRows.fold(0, (sum, row) => sum + (double.tryParse(row.amountCtrl.text) ?? 0));
 
   Future<void> _saveDailyAccount() async {
     final db = await DatabaseHelper().database;
-    final now = DatabaseHelper.now;
-    final showroomExpense =
-        double.tryParse(_showroomExpenseCtrl.text) ?? 0;
-    final cashReceived =
-        double.tryParse(_cashReceivedCtrl.text) ?? 0;
-    final otherIncome =
-        double.tryParse(_otherIncomeAmountCtrl.text) ?? 0;
-    final totalDue = _prevRemaining +
-        _totalLoadValue -
-        _totalReturnValue +
-        _totalWorkerExpenses +
-        _totalAdvances +
-        _totalDailyExpenses +
-        showroomExpense -
-        otherIncome;
+    final now = DateTime.now().toIso8601String();
+    final showroomExpense = double.tryParse(_showroomExpenseCtrl.text) ?? 0;
+    final cashReceived = double.tryParse(_cashReceivedCtrl.text) ?? 0;
+    final otherIncome = double.tryParse(_otherIncomeAmountCtrl.text) ?? 0;
+    final totalDue = _prevRemaining + _totalLoadValue - _totalReturnValue + _totalWorkerExpenses + _totalAdvances + _totalDailyExpenses + showroomExpense - otherIncome;
     final result = totalDue - cashReceived;
 
     await db.insert(
@@ -328,10 +317,7 @@ class _ShowroomScreenState extends State<ShowroomScreen>
     );
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('تم حفظ وإغلاق اليوم'),
-          backgroundColor: AppTheme.successColor,
-        ),
+        const SnackBar(content: Text('تم حفظ وإغلاق اليوم'), backgroundColor: AppTheme.successColor),
       );
     }
   }
@@ -365,39 +351,19 @@ class _ShowroomScreenState extends State<ShowroomScreen>
                   padding: const EdgeInsets.all(8.0),
                   child: Row(
                     children: [
-                      IconButton(
-                        icon: const Icon(Icons.chevron_right),
-                        onPressed: () {
-                          final d = DateTime.parse(_businessDate)
-                              .subtract(const Duration(days: 1));
-                          _businessDate =
-                              d.toIso8601String().substring(0, 10);
-                          _dateController.text = _businessDate;
-                          _loadAllData();
-                        },
-                      ),
-                      Expanded(
-                        child: TextField(
-                          controller: _dateController,
-                          decoration:
-                              const InputDecoration(labelText: 'التاريخ'),
-                          onSubmitted: (v) {
-                            _businessDate = v;
-                            _loadAllData();
-                          },
-                        ),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.chevron_left),
-                        onPressed: () {
-                          final d = DateTime.parse(_businessDate)
-                              .add(const Duration(days: 1));
-                          _businessDate =
-                              d.toIso8601String().substring(0, 10);
-                          _dateController.text = _businessDate;
-                          _loadAllData();
-                        },
-                      ),
+                      IconButton(icon: const Icon(Icons.chevron_right), onPressed: () {
+                        final d = DateTime.parse(_businessDate).subtract(const Duration(days: 1));
+                        _businessDate = d.toIso8601String().substring(0, 10);
+                        _dateController.text = _businessDate;
+                        _loadAllData();
+                      }),
+                      Expanded(child: TextField(controller: _dateController, decoration: const InputDecoration(labelText: 'التاريخ'), onSubmitted: (v) { _businessDate = v; _loadAllData(); })),
+                      IconButton(icon: const Icon(Icons.chevron_left), onPressed: () {
+                        final d = DateTime.parse(_businessDate).add(const Duration(days: 1));
+                        _businessDate = d.toIso8601String().substring(0, 10);
+                        _dateController.text = _businessDate;
+                        _loadAllData();
+                      }),
                     ],
                   ),
                 ),
@@ -424,71 +390,41 @@ class _ShowroomScreenState extends State<ShowroomScreen>
       padding: const EdgeInsets.all(8),
       child: Column(
         children: [
-          Row(
-            children: [
-              _summaryCard('السحبيات', _totalLoadValue, AppTheme.errorColor),
-              _summaryCard(
-                  'المرتجعات', _totalReturnValue, AppTheme.successColor),
-              _summaryCard('الصافي', _totalLoadValue - _totalReturnValue,
-                  AppTheme.primaryColor),
-            ],
-          ),
+          Row(children: [
+            _summaryCard('السحبيات', _totalLoadValue, AppTheme.errorColor),
+            _summaryCard('المرتجعات', _totalReturnValue, AppTheme.successColor),
+            _summaryCard('الصافي', _totalLoadValue - _totalReturnValue, AppTheme.primaryColor),
+          ]),
           const SizedBox(height: 8),
           Card(
             child: Padding(
               padding: const EdgeInsets.all(8),
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: DataTable(
-                  columns: const [
-                    DataColumn(label: Text('المنتج')),
-                    DataColumn(label: Text('سلة')),
-                    DataColumn(label: Text('سحب (سلال)')),
-                    DataColumn(label: Text('سحب (قطع)')),
-                    DataColumn(label: Text('مرتجع (سلال)')),
-                    DataColumn(label: Text('مرتجع (قطع)')),
-                    DataColumn(label: Text('قيمة السحب')),
-                    DataColumn(label: Text('قيمة المرتجع')),
-                    DataColumn(label: Text('الصافي')),
-                  ],
-                  rows: _products.map((p) {
-                    return DataRow(cells: [
-                      DataCell(Text(p.name)),
-                      DataCell(Text('${p.piecesPerBox}')),
-                      DataCell(SizedBox(
-                          width: 50,
-                          child: TextField(
-                              controller: _loadBoxesCtrl[p.id],
-                              keyboardType: TextInputType.number,
-                              onChanged: (_) => setState(() {})))),
-                      DataCell(SizedBox(
-                          width: 50,
-                          child: TextField(
-                              controller: _loadPiecesCtrl[p.id],
-                              keyboardType: TextInputType.number,
-                              onChanged: (_) => setState(() {})))),
-                      DataCell(SizedBox(
-                          width: 50,
-                          child: TextField(
-                              controller: _returnBoxesCtrl[p.id],
-                              keyboardType: TextInputType.number,
-                              onChanged: (_) => setState(() {})))),
-                      DataCell(SizedBox(
-                          width: 50,
-                          child: TextField(
-                              controller: _returnPiecesCtrl[p.id],
-                              keyboardType: TextInputType.number,
-                              onChanged: (_) => setState(() {})))),
-                      DataCell(Text(
-                          '${_getLoadValue(p.id).toStringAsFixed(0)}')),
-                      DataCell(Text(
-                          '${_getReturnValue(p.id).toStringAsFixed(0)}')),
-                      DataCell(Text(
-                          '${(_getLoadValue(p.id) - _getReturnValue(p.id)).toStringAsFixed(0)}')),
-                    ]);
-                  }).toList(),
-                ),
-              ),
+              child: SingleChildScrollView(scrollDirection: Axis.horizontal, child: DataTable(
+                columns: const [
+                  DataColumn(label: Text('المنتج')),
+                  DataColumn(label: Text('سلة')),
+                  DataColumn(label: Text('سحب (سلال)')),
+                  DataColumn(label: Text('سحب (قطع)')),
+                  DataColumn(label: Text('مرتجع (سلال)')),
+                  DataColumn(label: Text('مرتجع (قطع)')),
+                  DataColumn(label: Text('قيمة السحب')),
+                  DataColumn(label: Text('قيمة المرتجع')),
+                  DataColumn(label: Text('الصافي')),
+                ],
+                rows: _products.map((p) {
+                  return DataRow(cells: [
+                    DataCell(Text(p.name)),
+                    DataCell(Text('${p.piecesPerBox}')),
+                    DataCell(SizedBox(width: 50, child: TextField(controller: _loadBoxesCtrl[p.id], keyboardType: TextInputType.number, onChanged: (_) => setState(() {})))),
+                    DataCell(SizedBox(width: 50, child: TextField(controller: _loadPiecesCtrl[p.id], keyboardType: TextInputType.number, onChanged: (_) => setState(() {})))),
+                    DataCell(SizedBox(width: 50, child: TextField(controller: _returnBoxesCtrl[p.id], keyboardType: TextInputType.number, onChanged: (_) => setState(() {})))),
+                    DataCell(SizedBox(width: 50, child: TextField(controller: _returnPiecesCtrl[p.id], keyboardType: TextInputType.number, onChanged: (_) => setState(() {})))),
+                    DataCell(Text('${_getLoadValue(p.id).toStringAsFixed(0)}')),
+                    DataCell(Text('${_getReturnValue(p.id).toStringAsFixed(0)}')),
+                    DataCell(Text('${(_getLoadValue(p.id) - _getReturnValue(p.id)).toStringAsFixed(0)}')),
+                  ]);
+                }).toList(),
+              )),
             ),
           ),
         ],
@@ -502,303 +438,136 @@ class _ShowroomScreenState extends State<ShowroomScreen>
       padding: const EdgeInsets.all(8),
       child: Column(
         children: [
-          Row(
-            children: [
-              _summaryCard('إجمالي المصاريف', _totalWorkerExpenses,
-                  AppTheme.warningColor),
-              _summaryCard(
-                  'إجمالي البرانيات', _totalAdvances, AppTheme.errorColor),
-            ],
-          ),
+          Row(children: [
+            _summaryCard('إجمالي المصاريف', _totalWorkerExpenses, AppTheme.warningColor),
+            _summaryCard('إجمالي البرانيات', _totalAdvances, AppTheme.errorColor),
+          ]),
           Card(
             child: Padding(
               padding: const EdgeInsets.all(8),
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: DataTable(
-                  columns: const [
-                    DataColumn(label: Text('العامل')),
-                    DataColumn(label: Text('المصروف اليومي')),
-                    DataColumn(label: Text('استلم ✓')),
-                    DataColumn(label: Text('برانية')),
-                  ],
-                  rows: _workers.map((w) {
-                    return DataRow(cells: [
-                      DataCell(Text(w.name)),
-                      DataCell(Text('${w.salary}')),
-                      DataCell(Checkbox(
-                          value: _workerReceived[w.id] ?? false,
-                          onChanged: (v) => setState(() =>
-                              _workerReceived[w.id] = v ?? false))),
-                      DataCell(SizedBox(
-                          width: 80,
-                          child: TextField(
-                              controller: _advanceCtrl[w.id],
-                              keyboardType: TextInputType.number,
-                              onChanged: (_) => setState(() {})))),
-                    ]);
-                  }).toList(),
-                ),
-              ),
+              child: SingleChildScrollView(scrollDirection: Axis.horizontal, child: DataTable(
+                columns: const [
+                  DataColumn(label: Text('العامل')),
+                  DataColumn(label: Text('المصروف اليومي')),
+                  DataColumn(label: Text('استلم ✓')),
+                  DataColumn(label: Text('برانية')),
+                ],
+                rows: _workers.map((w) {
+                  return DataRow(cells: [
+                    DataCell(Text(w.name)),
+                    DataCell(Text('${w.dailyExpense ?? w.salary ?? 0}')),
+                    DataCell(Checkbox(value: _workerReceived[w.id] ?? false, onChanged: (v) => setState(() => _workerReceived[w.id] = v ?? false))),
+                    DataCell(SizedBox(width: 80, child: TextField(controller: _advanceCtrl[w.id], keyboardType: TextInputType.number, onChanged: (_) => setState(() {})))),
+                  ]);
+                }).toList(),
+              )),
             ),
+          ),
+          const SizedBox(height: 16),
+          ElevatedButton.icon(
+            onPressed: _saveWorkersData,
+            icon: const Icon(Icons.save),
+            label: const Text('حفظ بيانات العمال'),
           ),
         ],
       ),
     );
   }
 
-  // ============ التبويب 3: الخرج اليومي التفاعلي ============
+  // ============ التبويب 3: الخرج اليومي ============
   Widget _buildTab3() {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(8),
       child: Column(
         children: [
-          _summaryCard(
-              'إجمالي الخرج اليومي', _totalDailyExpenses, AppTheme.errorColor),
+          _summaryCard('إجمالي الخرج اليومي', _totalDailyExpenses, AppTheme.errorColor),
           const SizedBox(height: 8),
           ...List.generate(_expenseRows.length, (i) {
             final row = _expenseRows[i];
             return Card(
               child: Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 child: Row(
                   children: [
-                    Expanded(
-                      flex: 2,
-                      child: TextField(
-                        controller: row.amountCtrl,
-                        decoration: const InputDecoration(labelText: 'المبلغ'),
-                        keyboardType: TextInputType.number,
-                        onChanged: (_) => setState(() {}),
-                      ),
-                    ),
+                    Expanded(flex: 2, child: TextField(controller: row.amountCtrl, decoration: const InputDecoration(labelText: 'المبلغ'), keyboardType: TextInputType.number, onChanged: (_) => setState(() {}))),
                     const SizedBox(width: 8),
-                    Expanded(
-                      flex: 3,
-                      child: TextField(
-                        controller: row.detailsCtrl,
-                        decoration:
-                            const InputDecoration(labelText: 'التفاصيل'),
-                      ),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.delete,
-                          color: AppTheme.errorColor),
-                      onPressed: () {
-                        setState(() {
-                          _expenseRows.removeAt(i);
-                        });
-                      },
-                    ),
+                    Expanded(flex: 3, child: TextField(controller: row.detailsCtrl, decoration: const InputDecoration(labelText: 'التفاصيل'))),
+                    IconButton(icon: const Icon(Icons.delete, color: AppTheme.errorColor), onPressed: () { setState(() { _expenseRows.removeAt(i); }); }),
                   ],
                 ),
               ),
             );
           }),
-          TextButton.icon(
-            onPressed: () {
-              setState(() {
-                _expenseRows.add(_ExpenseRow());
-              });
-            },
-            icon: const Icon(Icons.add),
-            label: const Text('إضافة صف'),
-          ),
+          TextButton.icon(onPressed: () { setState(() { _expenseRows.add(_ExpenseRow()); }); }, icon: const Icon(Icons.add), label: const Text('إضافة صف')),
           const SizedBox(height: 16),
-          ElevatedButton.icon(
-            onPressed: _saveExpenses,
-            icon: const Icon(Icons.save),
-            label: const Text('حفظ الكشف'),
-          ),
+          ElevatedButton.icon(onPressed: _saveExpenses, icon: const Icon(Icons.save), label: const Text('حفظ الكشف')),
         ],
       ),
     );
   }
 
-  // ============ التبويب 4: كشف الحساب الرسمي ============
+  // ============ التبويب 4: كشف الحساب ============
   Widget _buildTab4() {
-    final showroomExpense =
-        double.tryParse(_showroomExpenseCtrl.text) ?? 0;
-    final cashReceived =
-        double.tryParse(_cashReceivedCtrl.text) ?? 0;
-    final otherIncome =
-        double.tryParse(_otherIncomeAmountCtrl.text) ?? 0;
-    final totalDue = _prevRemaining +
-        _totalLoadValue -
-        _totalReturnValue +
-        _totalWorkerExpenses +
-        _totalAdvances +
-        _totalDailyExpenses +
-        showroomExpense -
-        otherIncome;
+    final showroomExpense = double.tryParse(_showroomExpenseCtrl.text) ?? 0;
+    final cashReceived = double.tryParse(_cashReceivedCtrl.text) ?? 0;
+    final otherIncome = double.tryParse(_otherIncomeAmountCtrl.text) ?? 0;
+    final totalDue = _prevRemaining + _totalLoadValue - _totalReturnValue + _totalWorkerExpenses + _totalAdvances + _totalDailyExpenses + showroomExpense - otherIncome;
     final result = totalDue - cashReceived;
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(8),
       child: Column(
         children: [
-          Card(
-              child: ListTile(
-                  title: const Text('المدور عليه من اليوم السابق'),
-                  trailing:
-                      Text('${_prevRemaining.toStringAsFixed(0)}'))),
-          Card(
-              child: ListTile(
-                  title: const Text('قيمة السحبيات'),
-                  trailing:
-                      Text('${_totalLoadValue.toStringAsFixed(0)}'))),
-          Card(
-              child: ListTile(
-                  title: const Text('قيمة المرتجعات'),
-                  trailing:
-                      Text('- ${_totalReturnValue.toStringAsFixed(0)}'))),
-          Card(
-              child: ListTile(
-                  title: const Text('مصاريف العمال'),
-                  trailing: Text(
-                      '${_totalWorkerExpenses.toStringAsFixed(0)}'))),
-          Card(
-              child: ListTile(
-                  title: const Text('البرانيات'),
-                  trailing:
-                      Text('${_totalAdvances.toStringAsFixed(0)}'))),
-          Card(
-              child: ListTile(
-                  title: const Text('الخرج اليومي'),
-                  trailing: Text(
-                      '${_totalDailyExpenses.toStringAsFixed(0)}'))),
-          Card(
-              child: ListTile(
-                  title: const Text('مصروف المعرض'),
-                  trailing: SizedBox(
-                      width: 100,
-                      child: TextField(
-                          controller: _showroomExpenseCtrl,
-                          keyboardType: TextInputType.number,
-                          onChanged: (_) => setState(() {}))))),
-          Card(
-              child: ListTile(
-                  title: const Text('إيرادات أخرى'),
-                  trailing: SizedBox(
-                      width: 100,
-                      child: TextField(
-                          controller: _otherIncomeAmountCtrl,
-                          keyboardType: TextInputType.number,
-                          onChanged: (_) => setState(() {}))))),
+          Card(child: ListTile(title: const Text('المدور عليه من اليوم السابق'), trailing: Text('${_prevRemaining.toStringAsFixed(0)}'))),
+          Card(child: ListTile(title: const Text('قيمة السحبيات'), trailing: Text('${_totalLoadValue.toStringAsFixed(0)}'))),
+          Card(child: ListTile(title: const Text('قيمة المرتجعات'), trailing: Text('- ${_totalReturnValue.toStringAsFixed(0)}'))),
+          Card(child: ListTile(title: const Text('مصاريف العمال'), trailing: Text('${_totalWorkerExpenses.toStringAsFixed(0)}'))),
+          Card(child: ListTile(title: const Text('البرانيات'), trailing: Text('${_totalAdvances.toStringAsFixed(0)}'))),
+          Card(child: ListTile(title: const Text('الخرج اليومي'), trailing: Text('${_totalDailyExpenses.toStringAsFixed(0)}'))),
+          Card(child: ListTile(title: const Text('مصروف المعرض'), trailing: SizedBox(width: 100, child: TextField(controller: _showroomExpenseCtrl, keyboardType: TextInputType.number, onChanged: (_) => setState(() {}))))),
+          Card(child: ListTile(title: const Text('إيرادات أخرى'), trailing: SizedBox(width: 100, child: TextField(controller: _otherIncomeAmountCtrl, keyboardType: TextInputType.number, onChanged: (_) => setState(() {}))))),
           const Divider(),
-          Card(
-              color: AppTheme.primaryColor.withAlpha(20),
-              child: ListTile(
-                  title: const Text('المطلوب منه',
-                      style: TextStyle(fontWeight: FontWeight.bold)),
-                  trailing: Text('${totalDue.toStringAsFixed(0)}',
-                      style: const TextStyle(
-                          fontWeight: FontWeight.bold)))),
-          Card(
-              child: ListTile(
-                  title: const Text('الواصل نقداً'),
-                  trailing: SizedBox(
-                      width: 100,
-                      child: TextField(
-                          controller: _cashReceivedCtrl,
-                          keyboardType: TextInputType.number,
-                          onChanged: (_) => setState(() {}))))),
+          Card(color: AppTheme.primaryColor.withAlpha(20), child: ListTile(title: const Text('المطلوب منه', style: TextStyle(fontWeight: FontWeight.bold)), trailing: Text('${totalDue.toStringAsFixed(0)}', style: const TextStyle(fontWeight: FontWeight.bold)))),
+          Card(child: ListTile(title: const Text('الواصل نقداً'), trailing: SizedBox(width: 100, child: TextField(controller: _cashReceivedCtrl, keyboardType: TextInputType.number, onChanged: (_) => setState(() {}))))),
           const Divider(),
-          Card(
-              color: result == 0
-                  ? AppTheme.successColor.withAlpha(20)
-                  : AppTheme.errorColor.withAlpha(20),
-              child: ListTile(
-                title: Text(
-                    result > 0
-                        ? 'ضائع / عجز'
-                        : result < 0
-                            ? 'زيادة'
-                            : 'الحساب مطابق',
-                    style: const TextStyle(fontWeight: FontWeight.bold)),
-                trailing: Text('${result.toStringAsFixed(0)}',
-                    style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        color: result == 0
-                            ? AppTheme.successColor
-                            : AppTheme.errorColor)),
-              )),
+          Card(color: result == 0 ? AppTheme.successColor.withAlpha(20) : AppTheme.errorColor.withAlpha(20), child: ListTile(
+            title: Text(result > 0 ? 'ضائع / عجز' : result < 0 ? 'زيادة' : 'الحساب مطابق', style: const TextStyle(fontWeight: FontWeight.bold)),
+            trailing: Text('${result.toStringAsFixed(0)}', style: TextStyle(fontWeight: FontWeight.bold, color: result == 0 ? AppTheme.successColor : AppTheme.errorColor)),
+          )),
           const SizedBox(height: 16),
-          ElevatedButton.icon(
-            onPressed: _saveDailyAccount,
-            icon: const Icon(Icons.save),
-            label: const Text('حفظ وإغلاق اليوم'),
-          ),
+          ElevatedButton.icon(onPressed: _saveDailyAccount, icon: const Icon(Icons.save), label: const Text('حفظ وإغلاق اليوم')),
         ],
       ),
     );
   }
 
-  // ============ التبويب 5: قات العمال التفاعلي ============
+  // ============ التبويب 5: قات العمال ============
   Widget _buildTab5() {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(8),
       child: Column(
         children: [
-          _summaryCard(
-              'إجمالي قات العمال', _totalKhat, AppTheme.warningColor),
+          _summaryCard('إجمالي قات العمال', _totalKhat, AppTheme.warningColor),
           const SizedBox(height: 8),
           ...List.generate(_khatRows.length, (i) {
             final row = _khatRows[i];
             return Card(
               child: Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 child: Row(
                   children: [
-                    Expanded(
-                      flex: 2,
-                      child: TextField(
-                        controller: row.amountCtrl,
-                        decoration: const InputDecoration(labelText: 'المبلغ'),
-                        keyboardType: TextInputType.number,
-                        onChanged: (_) => setState(() {}),
-                      ),
-                    ),
+                    Expanded(flex: 2, child: TextField(controller: row.amountCtrl, decoration: const InputDecoration(labelText: 'المبلغ'), keyboardType: TextInputType.number, onChanged: (_) => setState(() {}))),
                     const SizedBox(width: 8),
-                    Expanded(
-                      flex: 3,
-                      child: TextField(
-                        controller: row.detailsCtrl,
-                        decoration:
-                            const InputDecoration(labelText: 'التفاصيل'),
-                      ),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.delete,
-                          color: AppTheme.errorColor),
-                      onPressed: () {
-                        setState(() {
-                          _khatRows.removeAt(i);
-                        });
-                      },
-                    ),
+                    Expanded(flex: 3, child: TextField(controller: row.detailsCtrl, decoration: const InputDecoration(labelText: 'التفاصيل'))),
+                    IconButton(icon: const Icon(Icons.delete, color: AppTheme.errorColor), onPressed: () { setState(() { _khatRows.removeAt(i); }); }),
                   ],
                 ),
               ),
             );
           }),
-          TextButton.icon(
-            onPressed: () {
-              setState(() {
-                _khatRows.add(_KhatRow());
-              });
-            },
-            icon: const Icon(Icons.add),
-            label: const Text('إضافة صف'),
-          ),
+          TextButton.icon(onPressed: () { setState(() { _khatRows.add(_KhatRow()); }); }, icon: const Icon(Icons.add), label: const Text('إضافة صف')),
           const SizedBox(height: 16),
-          ElevatedButton.icon(
-            onPressed: _saveKhat,
-            icon: const Icon(Icons.save),
-            label: const Text('حفظ الكشف'),
-          ),
+          ElevatedButton.icon(onPressed: _saveKhat, icon: const Icon(Icons.save), label: const Text('حفظ الكشف')),
         ],
       ),
     );
@@ -812,11 +581,7 @@ class _ShowroomScreenState extends State<ShowroomScreen>
           child: Column(
             children: [
               Text(title, style: const TextStyle(fontSize: 11)),
-              Text('${amount.toStringAsFixed(0)}',
-                  style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: color)),
+              Text('${amount.toStringAsFixed(0)}', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: color)),
             ],
           ),
         ),
@@ -831,11 +596,8 @@ class _ExpenseRow {
   final TextEditingController amountCtrl;
   final TextEditingController detailsCtrl;
 
-  _ExpenseRow({
-    this.id,
-    TextEditingController? amountCtrl,
-    TextEditingController? detailsCtrl,
-  })  : amountCtrl = amountCtrl ?? TextEditingController(text: '0'),
+  _ExpenseRow({this.id, TextEditingController? amountCtrl, TextEditingController? detailsCtrl})
+      : amountCtrl = amountCtrl ?? TextEditingController(text: '0'),
         detailsCtrl = detailsCtrl ?? TextEditingController();
 }
 
@@ -844,10 +606,7 @@ class _KhatRow {
   final TextEditingController amountCtrl;
   final TextEditingController detailsCtrl;
 
-  _KhatRow({
-    this.id,
-    TextEditingController? amountCtrl,
-    TextEditingController? detailsCtrl,
-  })  : amountCtrl = amountCtrl ?? TextEditingController(text: '0'),
+  _KhatRow({this.id, TextEditingController? amountCtrl, TextEditingController? detailsCtrl})
+      : amountCtrl = amountCtrl ?? TextEditingController(text: '0'),
         detailsCtrl = detailsCtrl ?? TextEditingController();
 }
