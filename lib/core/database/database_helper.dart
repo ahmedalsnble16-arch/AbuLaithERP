@@ -620,6 +620,7 @@ class DatabaseHelper {
       )
     ''');
 
+    // ============ جدول العمال (مُحدث) ============
     await db.execute('''
       CREATE TABLE ${DBConstants.tableWorkers} (
         id TEXT PRIMARY KEY,
@@ -627,6 +628,10 @@ class DatabaseHelper {
         job TEXT,
         phone TEXT,
         salary REAL DEFAULT 0,
+        daily_salary REAL DEFAULT 0,
+        daily_expense REAL DEFAULT 0,
+        card_number TEXT,
+        card_image TEXT,
         hire_date TEXT,
         active INTEGER DEFAULT 1,
         created_at TEXT NOT NULL,
@@ -975,6 +980,20 @@ class DatabaseHelper {
           created_by TEXT,
           device_id TEXT
         )
+      ''');
+    }
+    if (oldVersion < 5) {
+      await db.execute('''
+        ALTER TABLE ${DBConstants.tableWorkers} ADD COLUMN daily_salary REAL DEFAULT 0
+      ''');
+      await db.execute('''
+        ALTER TABLE ${DBConstants.tableWorkers} ADD COLUMN daily_expense REAL DEFAULT 0
+      ''');
+      await db.execute('''
+        ALTER TABLE ${DBConstants.tableWorkers} ADD COLUMN card_number TEXT
+      ''');
+      await db.execute('''
+        ALTER TABLE ${DBConstants.tableWorkers} ADD COLUMN card_image TEXT
       ''');
     }
   }
