@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:uuid/uuid.dart';
-import 'package:sqflite/sqflite.dart';
+import 'package:image_picker/image_picker.dart';
+import 'dart:io';
 import '../../config/theme.dart';
-import '../../core/constants/db_constants.dart';
 import '../../core/database/database_helper.dart';
-import '../../data/repositories/settings_repository.dart';
+import '../../core/constants/db_constants.dart';
+import '../../data/models/worker.dart';
+import '../../data/repositories/worker_repository.dart';
 import 'worker_account_screen.dart';
 
 class WorkersScreen extends StatefulWidget {
@@ -14,372 +15,203 @@ class WorkersScreen extends StatefulWidget {
   State<WorkersScreen> createState() => _WorkersScreenState();
 }
 
-class _WorkersScreenState extends State<WorkersScreen>
-    with SingleTickerProviderStateMixin {
-  final SettingsRepository _settingsRepo = SettingsRepository();
-  List<Map<String, dynamic>> _workers = [];
+class _WorkersScreenState extends State<WorkersScreen> {
+  final WorkerRepository _repo = WorkerRepository();
+  List<Worker> _workers = [];
   bool _isLoading = true;
   final TextEditingController _searchController = TextEditingController();
-
-  // متحكمات الإعدادات
-  bool _workersEnabled = true;
-  bool _autoCalculateSalary = true;
-  bool _allowAdvances = true;
-  bool _allowBraneyat = true;
-  final TextEditingController _defaultSalaryCtrl = TextEditingController();
-  final TextEditingController _defaultDailyExpenseCtrl = TextEditingController();
-  bool _isSavingSettings = false;
-
-  late TabController _tabController;
+  final ImagePicker _picker = ImagePicker();
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
-    _loadData();
-  }
-
-  Future<void> _loadData() async {
-    setState(() => _isLoading = true);
-    await _loadWorkers();
-    await _loadSettings();
-    setState(() => _isLoading = false);
-  }
-
-  Future<void> _loadWorkers() async {
-    final db = await DatabaseHelper().database;
-    final workers = await db.query(
-      DBConstants.tableWorkers,
-      where: 'deleted = 0',
-      orderBy: 'name ASC',
-    );
-    setState(() => _workers = workers);
-  }
-
-  Future<void> _loadSettings() async {
-    final settings = await _settingsRepo.getAll();
-    _workersEnabled = settings['workers_enabled'] != 'false';
-    _autoCalculateSalary = settings['auto_calculate_salary'] != 'false';
-    _allowAdvances = settings['allow_advances'] != 'false';
-    _allowBraneyat = settings['allow_braneyat'] != 'false';
-    _defaultSalaryCtrl.text = settings['default_daily_salary'] ?? '0';
-    _defaultDailyExpenseCtrl.text = settings['default_daily_expense'] ?? '0';
-    setState(() {});
-  }
-
-  Future<void> _saveSettings() async {
-    setState(() => _isSavingSettings = true);
-    try {
-      await _settingsRepo.setAll({
-        'workers_enabled': _workersEnabled.toString(),
-        'auto_calculate_salary': _autoCalculateSalary.toString(),
-        'allow_advances': _allowAdvances.toString(),
-        'allow_braneyat': _allowBraneyat.toString(),
-        'default_daily_salary': _defaultSalaryCtrl.text.trim(),
-        'default_daily_expense': _defaultDailyExpenseCtrl.text.trim(),
-      });
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('تم حفظ إعدادات العمال'),
-            backgroundColor: AppTheme.successColor,
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('خطأ: $e'), backgroundColor: AppTheme.errorColor),
-        );
-      }
-    } finally {
-      setState(() => _isSavingSettings = false);
-    }
-  }
-
-  // ============ إضافة / تعديل عامل ============
-  Future<void> _addOrEditWorker({Map<String, dynamic>? existing}) async {
-    final nameCtrl = TextEditingController(text: existing?['name'] ?? '');
-    final jobCtrl = TextEditingController(text: existing?['job'] ?? '');
-    final phoneCtrl = TextEditingController(text: existing?['phone'] ?? '');
-    final dailySalaryCtrl = TextEditingController(
-      text: '${existing?['daily_salary'] ?? existing?['salary'] ?? _defaultSalaryCtrl.text}',
-    );
-    final dailyExpenseCtrl = TextEditingController(
-      text: '${existing?['daily_expense'] ?? _defaultDailyExpenseCtrl.text}',
-    );
-    final cardNumberCtrl = TextEditingController(text: existing?['card_number'] ?? '');
-    final imagePathCtrl = TextEditingController(text: existing?['image_path'] ?? '');
-
-    final result = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(existing == null ? 'إضافة عامل' : 'تعديل عامل'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'الاسم *')),
-              const SizedBox(height: 8),
-              TextField(controller: jobCtrl, decoration: const InputDecoration(labelText: 'الوظيفة')),
-              const SizedBox(height: 8),
-              TextField(controller: phoneCtrl, decoration: const InputDecoration(labelText: 'الهاتف')),
-              const SizedBox(height: 8),
-              TextField(
-                controller: dailySalaryCtrl,
-                decoration: const InputDecoration(labelText: 'الأجر اليومي'),
-                keyboardType: TextInputType.number,
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: dailyExpenseCtrl,
-                decoration: const InputDecoration(labelText: 'المصروف اليومي'),
-                keyboardType: TextInputType.number,
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: cardNumberCtrl,
-                decoration: const InputDecoration(labelText: 'رقم البطاقة'),
-              ),
-              const SizedBox(height: 8),
-              // صورة البطاقة
-              ListTile(
-                leading: const Icon(Icons.camera_alt),
-                title: const Text('صورة البطاقة'),
-                subtitle: Text(imagePathCtrl.text.isEmpty ? 'اختر صورة' : imagePathCtrl.text),
-                onTap: () {
-                  // سيتم تفعيل image_picker لاحقاً
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('سيتم تفعيل التقاط الصورة قريباً')),
-                  );
-                },
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء')),
-          ElevatedButton(
-            onPressed: () async {
-              if (nameCtrl.text.trim().isEmpty) return;
-              final db = await DatabaseHelper().database;
-              final now = DatabaseHelper.now;
-              final id = existing?['id'] ?? const Uuid().v4();
-
-              await db.insert(
-                DBConstants.tableWorkers,
-                {
-                  'id': id,
-                  'name': nameCtrl.text.trim(),
-                  'job': jobCtrl.text.trim(),
-                  'phone': phoneCtrl.text.trim(),
-                  'salary': double.tryParse(dailySalaryCtrl.text) ?? 0,
-                  'daily_salary': double.tryParse(dailySalaryCtrl.text) ?? 0,
-                  'daily_expense': double.tryParse(dailyExpenseCtrl.text) ?? 0,
-                  'card_number': cardNumberCtrl.text.trim(),
-                  'image_path': imagePathCtrl.text.trim(),
-                  'hire_date': existing?['hire_date'] ?? DateTime.now().toIso8601String().substring(0, 10),
-                  'active': existing?['active'] ?? 1,
-                  'created_at': existing?['created_at'] ?? now,
-                  'updated_at': now,
-                  'sync_status': 'Pending',
-                  'deleted': 0,
-                },
-                conflictAlgorithm: ConflictAlgorithm.replace,
-              );
-              Navigator.pop(ctx, true);
-            },
-            child: const Text('حفظ'),
-          ),
-        ],
-      ),
-    );
-    if (result == true) _loadWorkers();
-  }
-
-  // ============ تعطيل / تنشيط العامل ============
-  Future<void> _toggleWorkerStatus(String workerId, bool isActive) async {
-    final db = await DatabaseHelper().database;
-    await db.update(
-      DBConstants.tableWorkers,
-      {'active': isActive ? 1 : 0, 'updated_at': DatabaseHelper.now},
-      where: 'id = ?',
-      whereArgs: [workerId],
-    );
     _loadWorkers();
   }
 
-  @override
-  void dispose() {
-    _searchController.dispose();
-    _defaultSalaryCtrl.dispose();
-    _defaultDailyExpenseCtrl.dispose();
-    _tabController.dispose();
-    super.dispose();
+  Future<void> _loadWorkers() async {
+    setState(() => _isLoading = true);
+    try {
+      final workers = await _repo.getAll();
+      setState(() { _workers = workers; _isLoading = false; });
+    } catch (e) {
+      setState(() => _isLoading = false);
+    }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('العمال'),
-        bottom: TabBar(
-          controller: _tabController,
-          labelColor: Colors.white,
-          unselectedLabelColor: Colors.white70,
-          tabs: const [
-            Tab(text: 'العمال'),
-            Tab(text: 'الإعدادات'),
-          ],
-        ),
-      ),
-      body: TabBarView(
-        controller: _tabController,
-        children: [
-          // تبويب العمال
-          Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.all(8.0),
-                child: TextField(
-                  controller: _searchController,
-                  decoration: const InputDecoration(hintText: 'بحث عن عامل...', prefixIcon: Icon(Icons.search)),
-                  onChanged: (v) {
-                    setState(() {
-                      _workers = _workers
-                          .where((w) => (w['name'] ?? '').toString().toLowerCase().contains(v.toLowerCase()))
-                          .toList();
-                      if (v.isEmpty) _loadWorkers();
-                    });
-                  },
-                ),
-              ),
-              Expanded(
-                child: _isLoading
-                    ? const Center(child: CircularProgressIndicator())
-                    : _workers.isEmpty
-                        ? const Center(child: Text('لا يوجد عمال'))
-                        : ListView.builder(
-                            itemCount: _workers.length,
-                            itemBuilder: (context, index) {
-                              final w = _workers[index];
-                              final isActive = w['active'] == 1;
-                              final dailySalary = w['daily_salary'] ?? w['salary'] ?? 0;
-                              final dailyExpense = w['daily_expense'] ?? 0;
-                              return Card(
-                                child: ListTile(
-                                  leading: CircleAvatar(
-                                    backgroundColor: isActive ? AppTheme.successColor : AppTheme.textSecondaryColor,
-                                    child: Icon(Icons.person, color: Colors.white),
-                                  ),
-                                  title: Text(w['name'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold)),
-                                  subtitle: Text('${w['job'] ?? ""} | أجر: $dailySalary | مصروف: $dailyExpense'),
-                                  trailing: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Switch(
-                                        value: isActive,
-                                        onChanged: (v) => _toggleWorkerStatus(w['id'] as String, v),
-                                      ),
-                                      PopupMenuButton<String>(
-                                        onSelected: (value) {
-                                          if (value == 'edit') {
-                                            _addOrEditWorker(existing: w);
-                                          } else if (value == 'deactivate') {
-                                            _toggleWorkerStatus(w['id'] as String, false);
-                                          }
-                                        },
-                                        itemBuilder: (ctx) => [
-                                          const PopupMenuItem(value: 'edit', child: Text('تعديل')),
-                                          const PopupMenuItem(value: 'deactivate', child: Text('تعطيل')),
-                                        ],
-                                      ),
-                                    ],
-                                  ),
-                                  onTap: () {
-                                    Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (_) => WorkerAccountScreen(
-                                          workerId: w['id'] as String,
-                                          workerName: w['name'] ?? '',
-                                        ),
-                                      ),
-                                    );
-                                  },
-                                ),
-                              );
-                            },
-                          ),
-              ),
-            ],
-          ),
-          // تبويب الإعدادات
-          SingleChildScrollView(
-            padding: const EdgeInsets.all(16),
+  Future<void> _addOrEditWorker({Worker? existing}) async {
+    final nameCtrl = TextEditingController(text: existing?.name ?? '');
+    final jobCtrl = TextEditingController(text: existing?.job ?? '');
+    final phoneCtrl = TextEditingController(text: existing?.phone ?? '');
+    final dailySalaryCtrl = TextEditingController(text: '${existing?.dailySalary ?? 0}');
+    final dailyExpenseCtrl = TextEditingController(text: '${existing?.dailyExpense ?? 0}');
+    final cardNumberCtrl = TextEditingController(text: existing?.cardNumber ?? '');
+    String? cardImagePath = existing?.cardImage;
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: Text(existing == null ? 'إضافة عامل' : 'تعديل عامل'),
+          content: SingleChildScrollView(
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text('إعدادات العمال', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppTheme.primaryColor)),
-                        const SizedBox(height: 16),
-                        SwitchListTile(
-                          title: const Text('تفعيل نظام العمال'),
-                          value: _workersEnabled,
-                          onChanged: (v) => setState(() => _workersEnabled = v),
-                        ),
-                        SwitchListTile(
-                          title: const Text('احتساب الأجر تلقائياً'),
-                          value: _autoCalculateSalary,
-                          onChanged: (v) => setState(() => _autoCalculateSalary = v),
-                        ),
-                        SwitchListTile(
-                          title: const Text('السماح بالسلف'),
-                          value: _allowAdvances,
-                          onChanged: (v) => setState(() => _allowAdvances = v),
-                        ),
-                        SwitchListTile(
-                          title: const Text('السماح بالبرانيات'),
-                          value: _allowBraneyat,
-                          onChanged: (v) => setState(() => _allowBraneyat = v),
-                        ),
-                        const SizedBox(height: 16),
-                        TextField(
-                          controller: _defaultSalaryCtrl,
-                          decoration: const InputDecoration(labelText: 'الأجر اليومي الافتراضي'),
-                          keyboardType: TextInputType.number,
-                        ),
-                        const SizedBox(height: 12),
-                        TextField(
-                          controller: _defaultDailyExpenseCtrl,
-                          decoration: const InputDecoration(labelText: 'المصروف اليومي الافتراضي'),
-                          keyboardType: TextInputType.number,
-                        ),
-                        const SizedBox(height: 24),
-                        SizedBox(
-                          width: double.infinity,
-                          height: 50,
-                          child: ElevatedButton(
-                            onPressed: _isSavingSettings ? null : _saveSettings,
-                            child: _isSavingSettings
-                                ? const CircularProgressIndicator(color: Colors.white)
-                                : const Text('حفظ إعدادات العمال'),
-                          ),
-                        ),
-                      ],
+                TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'الاسم *')),
+                TextField(controller: jobCtrl, decoration: const InputDecoration(labelText: 'الوظيفة')),
+                TextField(controller: phoneCtrl, decoration: const InputDecoration(labelText: 'الهاتف')),
+                TextField(controller: dailySalaryCtrl, decoration: const InputDecoration(labelText: 'الأجر اليومي'), keyboardType: TextInputType.number),
+                TextField(controller: dailyExpenseCtrl, decoration: const InputDecoration(labelText: 'المصروف اليومي'), keyboardType: TextInputType.number),
+                TextField(controller: cardNumberCtrl, decoration: const InputDecoration(labelText: 'رقم البطاقة')),
+                const SizedBox(height: 12),
+                // صورة البطاقة
+                InkWell(
+                  onTap: () async {
+                    final picked = await _picker.pickImage(source: ImageSource.gallery);
+                    if (picked != null) {
+                      setDialogState(() => cardImagePath = picked.path);
+                    }
+                  },
+                  child: Container(
+                    width: 100, height: 100,
+                    decoration: BoxDecoration(
+                      border: Border.all(color: AppTheme.primaryColor),
+                      borderRadius: BorderRadius.circular(8),
                     ),
+                    child: cardImagePath != null
+                        ? Image.file(File(cardImagePath!), fit: BoxFit.cover)
+                        : const Icon(Icons.camera_alt, size: 40, color: AppTheme.primaryColor),
                   ),
                 ),
               ],
             ),
           ),
-        ],
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء')),
+            ElevatedButton(
+              onPressed: () async {
+                if (nameCtrl.text.trim().isEmpty) return;
+                final worker = Worker(
+                  id: existing?.id ?? '',
+                  name: nameCtrl.text.trim(),
+                  job: jobCtrl.text.trim(),
+                  phone: phoneCtrl.text.trim(),
+                  dailySalary: double.tryParse(dailySalaryCtrl.text) ?? 0,
+                  dailyExpense: double.tryParse(dailyExpenseCtrl.text) ?? 0,
+                  cardNumber: cardNumberCtrl.text.trim(),
+                  cardImage: cardImagePath,
+                  active: existing?.active ?? true,
+                  createdAt: existing?.createdAt ?? DateTime.now().toIso8601String(),
+                  updatedAt: DateTime.now().toIso8601String(),
+                );
+                if (existing == null) {
+                  await _repo.add(worker);
+                } else {
+                  await _repo.update(worker);
+                }
+                Navigator.pop(ctx, true);
+              },
+              child: const Text('حفظ'),
+            ),
+          ],
+        ),
       ),
+    );
+    if (result == true) _loadWorkers();
+  }
+
+  Future<void> _toggleActive(Worker worker) async {
+    final updated = worker.copyWith(active: !worker.active);
+    await _repo.update(updated);
+    _loadWorkers();
+  }
+
+  Future<void> _deleteWorker(Worker worker) async {
+    // التحقق من وجود حركات مالية
+    final db = await DatabaseHelper().database;
+    final transactions = await db.query(
+      DBConstants.tableWorkerAccounts,
+      where: 'worker_id = ?',
+      whereArgs: [worker.id],
+    );
+    if (transactions.isNotEmpty) {
+      // تعطيل بدلاً من حذف
+      await _repo.update(worker.copyWith(active: false));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('تم تعطيل العامل لوجود حركات مالية سابقة')),
+      );
+    } else {
+      await _repo.delete(worker.id);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('تم حذف العامل')),
+      );
+    }
+    _loadWorkers();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('العمال')),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: TextField(
+                    controller: _searchController,
+                    decoration: const InputDecoration(hintText: 'بحث عن عامل...', prefixIcon: Icon(Icons.search)),
+                    onChanged: (v) => _loadWorkers(),
+                  ),
+                ),
+                Expanded(
+                  child: _workers.isEmpty
+                      ? const Center(child: Text('لا يوجد عمال'))
+                      : ListView.builder(
+                          itemCount: _workers.length,
+                          itemBuilder: (context, index) {
+                            final w = _workers[index];
+                            return Card(
+                              child: ListTile(
+                                leading: CircleAvatar(
+                                  backgroundColor: w.active ? AppTheme.successColor : AppTheme.textSecondaryColor,
+                                  child: Icon(Icons.person, color: Colors.white),
+                                ),
+                                title: Text(w.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                                subtitle: Text('${w.job ?? ""} | الأجر: ${w.dailySalary} | المصروف: ${w.dailyExpense}'),
+                                trailing: PopupMenuButton<String>(
+                                  onSelected: (value) {
+                                    if (value == 'edit') _addOrEditWorker(existing: w);
+                                    if (value == 'toggle') _toggleActive(w);
+                                    if (value == 'delete') _deleteWorker(w);
+                                  },
+                                  itemBuilder: (ctx) => [
+                                    const PopupMenuItem(value: 'edit', child: Text('✏️ تعديل')),
+                                    PopupMenuItem(value: 'toggle', child: Text(w.active ? '⏸️ تعطيل' : '✅ تنشيط')),
+                                    const PopupMenuItem(value: 'delete', child: Text('🗑️ حذف')),
+                                  ],
+                                ),
+                                onTap: () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => WorkerAccountScreen(
+                                        workerId: w.id,
+                                        workerName: w.name,
+                                        dailySalary: w.dailySalary,
+                                        dailyExpense: w.dailyExpense,
+                                        isActive: w.active,
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
+                            );
+                          },
+                        ),
+                ),
+              ],
+            ),
       floatingActionButton: FloatingActionButton(
         onPressed: () => _addOrEditWorker(),
         child: const Icon(Icons.add),
