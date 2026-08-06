@@ -424,6 +424,53 @@ class ShowroomRepository {
       await db.insert(DBConstants.tableShowroomDailyAccount, data);
     }
 
+    // إذا تم إغلاق اليومية، نسجل قيود الخزنة والمصاريف
+    if (closed) {
+      // قيد توريد نقدي للخزنة
+      if (cashReceived > 0) {
+        await db.insert(DBConstants.tableTreasury, {
+          'id': _uuid.v4(),
+          'transaction_number': 'SHW-$businessDate-${DateTime.now().millisecondsSinceEpoch}',
+          'transaction_type': DBConstants.txnTypeReceipt,
+          'amount': cashReceived,
+          'source_module': 'معرض',
+          'source_id': businessDate,
+          'payment_method': 'نقدي',
+          'note': 'توريد نقدي من المعرض عن يوم $businessDate',
+          'transaction_date': businessDate,
+          'status': DBConstants.statusApproved,
+          'approved_by': closedBy ?? createdBy,
+          'created_at': now,
+          'updated_at': now,
+          'created_by': createdBy,
+          'device_id': deviceId,
+          'sync_status': 'Pending',
+          'deleted': 0,
+        });
+      }
+
+      // قيد مصروف يومي إجمالي (الخرج اليومي)
+      if (totalDailyExpenses > 0) {
+        await db.insert(DBConstants.tableExpenses, {
+          'id': _uuid.v4(),
+          'title': 'مصاريف يومية - معرض $businessDate',
+          'category': 'مصاريف معرض',
+          'amount': totalDailyExpenses,
+          'note': 'إجمالي الخرج اليومي للمعرض (يشمل الكشف الصغير)',
+          'expense_date': businessDate,
+          'status': DBConstants.statusApproved,
+          'approved_by': closedBy ?? createdBy,
+          'created_at': now,
+          'updated_at': now,
+          'created_by': createdBy,
+          'device_id': deviceId,
+          'sync_status': 'Pending',
+          'deleted': 0,
+        });
+      }
+    }
+
+    // تدقيق
     await db.insert(DBConstants.tableAuditLogs, {
       'id': _uuid.v4(),
       'user_id': createdBy,
@@ -433,6 +480,24 @@ class ShowroomRepository {
       'device_id': deviceId,
       'created_at': now,
     });
+  }
+
+  /// تأكيد استلام النقدية فقط (بدون إغلاق)
+  Future<void> confirmCash({
+    required String businessDate,
+    required bool confirmed,
+    String? confirmedBy,
+  }) async {
+    final db = await _dbHelper.database;
+    await db.update(
+      DBConstants.tableShowroomDailyAccount,
+      {
+        'cash_confirmed': confirmed ? 1 : 0,
+        'confirmed_by': confirmed ? confirmedBy : null,
+      },
+      where: 'business_date = ?',
+      whereArgs: [businessDate],
+    );
   }
 
   Future<Map<String, dynamic>?> getPreviousDayAccount(String currentDate) async {
@@ -490,7 +555,6 @@ class ShowroomRepository {
   }
 
   // ========== دوال تكميلية ==========
-
   Future<int> getAvailableStock(String productId) async {
     final db = await _dbHelper.database;
     final rows = await db.query(
