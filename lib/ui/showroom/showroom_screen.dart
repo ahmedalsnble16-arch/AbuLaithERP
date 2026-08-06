@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 import '../../config/theme.dart';
-import '../../core/database/database_helper.dart';
 import '../../data/models/product.dart';
 import '../../data/models/worker.dart';
 import '../../data/repositories/product_repository.dart';
@@ -28,33 +27,39 @@ class _ShowroomScreenState extends State<ShowroomScreen>
   String _businessDate = DateTime.now().toIso8601String().substring(0, 10);
   final TextEditingController _dateController = TextEditingController();
 
-  // متحكمات السحبيات والمرتجعات
+  // السحبيات والمرتجعات
   final Map<String, TextEditingController> _loadBoxesCtrl = {};
   final Map<String, TextEditingController> _loadPiecesCtrl = {};
   final Map<String, TextEditingController> _returnBoxesCtrl = {};
   final Map<String, TextEditingController> _returnPiecesCtrl = {};
 
-  // متحكمات العمال
+  // مدور الأمس
+  Map<String, int> _yesterdayRemaining = {};
+
+  // العمال
   Map<String, bool> _workerReceived = {};
   final Map<String, TextEditingController> _advanceCtrl = {};
 
   // الخرج اليومي
   final List<_DynamicRow> _expenseRows = [];
-  bool _expensesLoaded = false;
 
-  // قات العمال
+  // الكشف الصغير (تبويب 4)
+  final List<_DynamicRow> _smallLedgerRows = [];
+
+  // القات
   final List<_KhatRow> _khatRows = [];
-  bool _khatLoaded = false;
 
   // كشف الحساب
   final TextEditingController _showroomExpenseCtrl = TextEditingController();
   final TextEditingController _cashReceivedCtrl = TextEditingController();
-  final TextEditingController _otherIncomeAmountCtrl = TextEditingController();
   bool _cashConfirmed = false;
 
   bool _isLoading = true;
   late TabController _tabController;
-  double _prevRemainingValue = 0.0; // قيمة مدور أمس (بالبضاعة)
+
+  // قيم اليوم السابق
+  double _prevRemainingValue = 0.0;   // قيمة مدور البضاعة
+  double _prevResultAmount = 0.0;     // العجز/الزيادة المالية من اليوم السابق
 
   @override
   void initState() {
@@ -74,15 +79,22 @@ class _ShowroomScreenState extends State<ShowroomScreen>
     for (var c in _returnPiecesCtrl.values) { c.dispose(); }
     for (var c in _advanceCtrl.values) { c.dispose(); }
     _clearExpenseControllers();
+    _clearSmallLedgerControllers();
     _clearKhatControllers();
     _showroomExpenseCtrl.dispose();
     _cashReceivedCtrl.dispose();
-    _otherIncomeAmountCtrl.dispose();
     super.dispose();
   }
 
   void _clearExpenseControllers() {
     for (var row in _expenseRows) {
+      row.amountCtrl.dispose();
+      row.detailsCtrl.dispose();
+    }
+  }
+
+  void _clearSmallLedgerControllers() {
+    for (var row in _smallLedgerRows) {
       row.amountCtrl.dispose();
       row.detailsCtrl.dispose();
     }
@@ -98,19 +110,23 @@ class _ShowroomScreenState extends State<ShowroomScreen>
   Future<void> _loadAllData() async {
     setState(() => _isLoading = true);
     try {
-      final db = await DatabaseHelper().database;
-
       // المنتجات
       final products = await _productRepo.getAll();
       _products = products.where((p) => p.active).toList();
+      
+      _yesterdayRemaining.clear();
       for (var p in _products) {
         _loadBoxesCtrl[p.id] ??= TextEditingController(text: '0');
         _loadPiecesCtrl[p.id] ??= TextEditingController(text: '0');
         _returnBoxesCtrl[p.id] ??= TextEditingController(text: '0');
         _returnPiecesCtrl[p.id] ??= TextEditingController(text: '0');
+
+        // تحميل مدور أمس
+        final remaining = await _showroomRepo.getYesterdayRemaining(_businessDate, p.id);
+        _yesterdayRemaining[p.id] = remaining;
       }
 
-      // تحميل بيانات اليوم الحالي للمنتجات (إن وجدت)
+      // تحميل الإدخالات السابقة
       for (var p in _products) {
         final entry = await _showroomRepo.getEntry(_businessDate, p.id);
         if (entry != null) {
@@ -126,23 +142,27 @@ class _ShowroomScreenState extends State<ShowroomScreen>
       for (var w in _workers) {
         _advanceCtrl[w.id] ??= TextEditingController(text: '0');
       }
-      // تحميل حضور اليوم
       _workerReceived = await _showroomRepo.getWorkerAttendance(_businessDate);
 
-      // الرصيد المرحل (قيمة مدور البضاعة من الأمس)
-      final yesterday = DateTime.parse(_businessDate)
+      // البيانات المالية من اليوم السابق
+      final prevDay = DateTime.parse(_businessDate)
           .subtract(const Duration(days: 1))
           .toIso8601String()
           .substring(0, 10);
-      final prevAccount = await _showroomRepo.getDailyAccount(yesterday);
+      final prevAccount = await _showroomRepo.getPreviousDayFull(prevDay);
       if (prevAccount != null) {
         _prevRemainingValue = (prevAccount['previous_remaining_value'] as num?)?.toDouble() ?? 0.0;
+        _prevResultAmount = (prevAccount['result_amount'] as num?)?.toDouble() ?? 0.0;
       } else {
         _prevRemainingValue = 0.0;
+        _prevResultAmount = 0.0;
       }
 
       // تحميل الخرج اليومي
       await _loadExpenses();
+
+      // تحميل الكشف الصغير
+      await _loadSmallLedger();
 
       // تحميل القات
       await _loadKhat();
@@ -152,15 +172,12 @@ class _ShowroomScreenState extends State<ShowroomScreen>
       if (currentAccount != null) {
         _showroomExpenseCtrl.text = (currentAccount['showroom_expense'] ?? 0).toString();
         _cashReceivedCtrl.text = (currentAccount['cash_received'] ?? 0).toString();
-        _otherIncomeAmountCtrl.text = (currentAccount['other_income'] ?? 0).toString();
         _cashConfirmed = (currentAccount['cash_confirmed'] as int? ?? 0) == 1;
       } else {
         _showroomExpenseCtrl.text = '0';
         _cashReceivedCtrl.text = '0';
-        _otherIncomeAmountCtrl.text = '0';
         _cashConfirmed = false;
       }
-
     } catch (e) {
       debugPrint('Error loading showroom: $e');
     }
@@ -182,7 +199,23 @@ class _ShowroomScreenState extends State<ShowroomScreen>
         ));
       }
     }
-    _expensesLoaded = true;
+  }
+
+  Future<void> _loadSmallLedger() async {
+    final rows = await _showroomRepo.getSmallLedger(_businessDate);
+    _clearSmallLedgerControllers();
+    _smallLedgerRows.clear();
+    if (rows.isEmpty) {
+      _smallLedgerRows.add(_DynamicRow(id: _uuid.v4()));
+    } else {
+      for (var r in rows) {
+        _smallLedgerRows.add(_DynamicRow(
+          id: r['id']?.toString() ?? _uuid.v4(),
+          amountCtrl: TextEditingController(text: '${r['amount'] ?? 0}'),
+          detailsCtrl: TextEditingController(text: r['details'] ?? ''),
+        ));
+      }
+    }
   }
 
   Future<void> _loadKhat() async {
@@ -200,10 +233,9 @@ class _ShowroomScreenState extends State<ShowroomScreen>
         ));
       }
     }
-    _khatLoaded = true;
   }
 
-  // ---------- الحسابات المساعدة ----------
+  // ---------- دوال مساعدة ----------
   int _getBoxSize(String productId) {
     final p = _products.firstWhere((e) => e.id == productId,
         orElse: () => Product(id: '', name: '', createdAt: '', updatedAt: ''));
@@ -228,6 +260,13 @@ class _ShowroomScreenState extends State<ShowroomScreen>
     return (boxes * _getBoxSize(productId)) + pieces;
   }
 
+  int _getCurrentRemainingPieces(String productId) {
+    final yesterday = _yesterdayRemaining[productId] ?? 0;
+    final load = _getLoadPieces(productId);
+    final ret = _getReturnPieces(productId);
+    return yesterday + load - ret;
+  }
+
   double _getLoadValue(String productId) =>
       _getLoadPieces(productId) * _getRetailPrice(productId);
 
@@ -244,7 +283,7 @@ class _ShowroomScreenState extends State<ShowroomScreen>
     double total = 0;
     for (var w in _workers) {
       if (_workerReceived[w.id] == true) {
-        total += w.dailyExpense; // استخدم dailyExpense بدلاً من salary
+        total += w.dailyExpense;
       }
     }
     return total;
@@ -256,11 +295,40 @@ class _ShowroomScreenState extends State<ShowroomScreen>
   double get _totalDailyExpenses => _expenseRows.fold(
       0.0, (sum, row) => sum + (double.tryParse(row.amountCtrl.text) ?? 0));
 
+  double get _totalSmallLedger => _smallLedgerRows.fold(
+      0.0, (sum, row) => sum + (double.tryParse(row.amountCtrl.text) ?? 0));
+
   double get _totalKhat => _khatRows.fold(
       0.0, (sum, row) => sum + (double.tryParse(row.amountCtrl.text) ?? 0));
 
-  // ---------- عمليات الحفظ ----------
+  // ---------- الحفظ ----------
   Future<void> _saveCurrentTab1() async {
+    final Map<String, int> availableStock = {};
+    for (var p in _products) {
+      availableStock[p.id] = await _showroomRepo.getAvailableStock(p.id);
+    }
+
+    final List<String> errors = [];
+    for (var p in _products) {
+      final needed = _getLoadPieces(p.id);
+      if (needed > (availableStock[p.id] ?? 0)) {
+        errors.add('${p.name}: المطلوب $needed، المتاح ${availableStock[p.id]}');
+      }
+    }
+    if (errors.isNotEmpty) {
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('تجاوز المخزون'),
+          content: Text('الكميات التالية أكبر من المخزون:\n${errors.join('\n')}'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('حسناً')),
+          ],
+        ),
+      );
+      return;
+    }
+
     try {
       for (var p in _products) {
         await _showroomRepo.saveEntry(
@@ -272,7 +340,7 @@ class _ShowroomScreenState extends State<ShowroomScreen>
           returnPieces: int.tryParse(_returnPiecesCtrl[p.id]?.text ?? '0') ?? 0,
           boxSize: _getBoxSize(p.id),
           retailPrice: _getRetailPrice(p.id),
-          createdBy: 'admin', // يجب استبداله بالمستخدم الفعلي
+          createdBy: 'admin',
           deviceId: 'mobile',
         );
       }
@@ -285,7 +353,7 @@ class _ShowroomScreenState extends State<ShowroomScreen>
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('خطأ: $e'), backgroundColor: AppTheme.errorColor),
+          SnackBar(content: Text('خطأ أثناء الحفظ: $e'), backgroundColor: AppTheme.errorColor),
         );
       }
     }
@@ -293,16 +361,20 @@ class _ShowroomScreenState extends State<ShowroomScreen>
 
   Future<void> _saveTab2() async {
     try {
-      // حفظ الحضور
       for (var w in _workers) {
+        final present = _workerReceived[w.id] ?? false;
         await _showroomRepo.setWorkerAttendance(
-          workerId: w.id,
-          date: _businessDate,
-          present: _workerReceived[w.id] ?? false,
+          workerId: w.id, date: _businessDate, present: present,
         );
-      }
-      // حفظ البرانيات (فقط إذا كانت القيمة > 0)
-      for (var w in _workers) {
+        if (present) {
+          await _showroomRepo.recordWorkerDailyExpense(
+            workerId: w.id,
+            date: _businessDate,
+            amount: w.dailyExpense,
+            createdBy: 'admin',
+            deviceId: 'mobile',
+          );
+        }
         final advance = double.tryParse(_advanceCtrl[w.id]?.text ?? '0') ?? 0;
         if (advance > 0) {
           await _showroomRepo.saveWorkerAdvance(
@@ -316,8 +388,7 @@ class _ShowroomScreenState extends State<ShowroomScreen>
       }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('تم حفظ كشف العمال'),
-              backgroundColor: AppTheme.successColor),
+          const SnackBar(content: Text('تم حفظ كشف العمال'), backgroundColor: AppTheme.successColor),
         );
       }
     } catch (e) {
@@ -344,8 +415,34 @@ class _ShowroomScreenState extends State<ShowroomScreen>
       );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('تم حفظ الخرج اليومي'),
-              backgroundColor: AppTheme.successColor),
+          const SnackBar(content: Text('تم حفظ الخرج اليومي'), backgroundColor: AppTheme.successColor),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('خطأ: $e'), backgroundColor: AppTheme.errorColor),
+        );
+      }
+    }
+  }
+
+  Future<void> _saveSmallLedger() async {
+    try {
+      final List<Map<String, dynamic>> list = _smallLedgerRows.map((row) => {
+        'id': row.id,
+        'amount': double.tryParse(row.amountCtrl.text) ?? 0,
+        'details': row.detailsCtrl.text,
+      }).toList();
+      await _showroomRepo.saveSmallLedger(
+        businessDate: _businessDate,
+        entries: list,
+        createdBy: 'admin',
+        deviceId: 'mobile',
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('تم حفظ الكشف الصغير'), backgroundColor: AppTheme.successColor),
         );
       }
     } catch (e) {
@@ -372,8 +469,7 @@ class _ShowroomScreenState extends State<ShowroomScreen>
       );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('تم حفظ كشف القات'),
-              backgroundColor: AppTheme.successColor),
+          const SnackBar(content: Text('تم حفظ كشف القات'), backgroundColor: AppTheme.successColor),
         );
       }
     } catch (e) {
@@ -388,17 +484,16 @@ class _ShowroomScreenState extends State<ShowroomScreen>
   Future<void> _saveAndCloseDay() async {
     final showroomExpense = double.tryParse(_showroomExpenseCtrl.text) ?? 0;
     final cashReceived = double.tryParse(_cashReceivedCtrl.text) ?? 0;
-    final otherIncome = double.tryParse(_otherIncomeAmountCtrl.text) ?? 0;
-    final netGoods = _totalLoadValue - _totalReturnValue;
-    final totalDue = _prevRemainingValue +
-        _totalLoadValue -
-        _totalReturnValue +
-        _totalWorkerExpenses +
-        _totalAdvances +
-        _totalDailyExpenses +
-        showroomExpense -
-        otherIncome;
+    
+    final previousDue = _prevRemainingValue + _prevResultAmount;
+    final goodsNet = _totalLoadValue - _totalReturnValue;
+    final totalDueFromGoods = previousDue + goodsNet;
+    
+    final totalExpenses = _totalWorkerExpenses + _totalAdvances + _totalDailyExpenses + _totalSmallLedger + showroomExpense;
+    final totalDue = totalDueFromGoods - totalExpenses;
+    
     final result = totalDue - cashReceived;
+    
     String status;
     if (result > 0) {
       status = 'عجز';
@@ -413,11 +508,11 @@ class _ShowroomScreenState extends State<ShowroomScreen>
       previousRemainingValue: _prevRemainingValue,
       totalLoadValue: _totalLoadValue,
       totalReturnValue: _totalReturnValue,
-      netGoodsValue: netGoods,
+      netGoodsValue: goodsNet,
       totalWorkerExpenses: _totalWorkerExpenses,
       totalWorkerAdvances: _totalAdvances,
-      totalDailyExpenses: _totalDailyExpenses,
-      otherIncome: otherIncome,
+      totalDailyExpenses: _totalDailyExpenses + _totalSmallLedger,
+      otherIncome: 0,
       showroomExpense: showroomExpense,
       totalDue: totalDue,
       cashReceived: cashReceived,
@@ -433,8 +528,7 @@ class _ShowroomScreenState extends State<ShowroomScreen>
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('تم حفظ وإغلاق اليوم بنجاح'),
-            backgroundColor: AppTheme.successColor),
+        const SnackBar(content: Text('تم حفظ وإغلاق اليوم بنجاح'), backgroundColor: AppTheme.successColor),
       );
     }
   }
@@ -445,6 +539,10 @@ class _ShowroomScreenState extends State<ShowroomScreen>
     return Scaffold(
       appBar: AppBar(
         title: const Text('المعرض'),
+        actions: [
+          IconButton(icon: const Icon(Icons.print), onPressed: _printReport),
+          IconButton(icon: const Icon(Icons.file_download), onPressed: _exportReport),
+        ],
         bottom: TabBar(
           controller: _tabController,
           isScrollable: true,
@@ -482,6 +580,18 @@ class _ShowroomScreenState extends State<ShowroomScreen>
     );
   }
 
+  void _printReport() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('جاري إعداد التقرير للطباعة...')),
+    );
+  }
+
+  void _exportReport() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('جاري تصدير التقرير...')),
+    );
+  }
+
   Widget _buildDateBar() {
     return Container(
       color: Theme.of(context).primaryColor.withAlpha(15),
@@ -501,11 +611,7 @@ class _ShowroomScreenState extends State<ShowroomScreen>
             child: TextField(
               controller: _dateController,
               textAlign: TextAlign.center,
-              decoration: const InputDecoration(
-                labelText: 'التاريخ',
-                isDense: true,
-                border: OutlineInputBorder(),
-              ),
+              decoration: const InputDecoration(labelText: 'التاريخ', isDense: true, border: OutlineInputBorder()),
               onSubmitted: (v) {
                 if (v.trim().isNotEmpty) {
                   _businessDate = v.trim();
@@ -534,14 +640,12 @@ class _ShowroomScreenState extends State<ShowroomScreen>
       padding: const EdgeInsets.all(8),
       child: Column(
         children: [
-          // بطاقات ملخص
           Row(children: [
             _summaryCard('إجمالي السحبيات', _totalLoadValue, AppTheme.errorColor),
             _summaryCard('إجمالي المرتجعات', _totalReturnValue, AppTheme.successColor),
             _summaryCard('الصافي', _totalLoadValue - _totalReturnValue, AppTheme.primaryColor),
           ]),
           const SizedBox(height: 8),
-          // جدول المنتجات
           Card(
             child: Padding(
               padding: const EdgeInsets.all(8),
@@ -589,7 +693,7 @@ class _ShowroomScreenState extends State<ShowroomScreen>
             ),
           ),
           const SizedBox(height: 12),
-          // قسم المدور عليه
+          // قسم المدور عليه التفصيلي
           Card(
             child: Padding(
               padding: const EdgeInsets.all(12),
@@ -599,20 +703,36 @@ class _ShowroomScreenState extends State<ShowroomScreen>
                   const Text('📦 المدور عليه (البضاعة المتبقية في المعرض)',
                       style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                   const SizedBox(height: 8),
-                  ..._products.map((p) {
-                    final loadPieces = _getLoadPieces(p.id);
-                    final returnPieces = _getReturnPieces(p.id);
-                    // المدور = (مدور أمس) + سحب - مرتجع
-                    // نعتمد على القيمة المخزنة في showroom_daily_entries عند التحميل
-                    // هنا للعرض فقط بناءً على القيم المدخلة
-                    return ListTile(
-                      title: Text(p.name),
-                      trailing: Text(
-                        '${_getRemainingDisplay(p.id)}',
-                        style: const TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                    );
-                  }).toList(),
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: DataTable(
+                      columns: const [
+                        DataColumn(label: Text('المنتج')),
+                        DataColumn(label: Text('سلال')),
+                        DataColumn(label: Text('قطع')),
+                        DataColumn(label: Text('سعر التجزئة')),
+                        DataColumn(label: Text('القيمة الإجمالية')),
+                      ],
+                      rows: _products.map((p) {
+                        final totalPieces = _getCurrentRemainingPieces(p.id);
+                        final boxes = totalPieces ~/ _getBoxSize(p.id);
+                        final pieces = totalPieces % _getBoxSize(p.id);
+                        final value = totalPieces * _getRetailPrice(p.id);
+                        return DataRow(cells: [
+                          DataCell(Text(p.name)),
+                          DataCell(Text('$boxes')),
+                          DataCell(Text('$pieces')),
+                          DataCell(Text('${_getRetailPrice(p.id)}')),
+                          DataCell(Text('${value.toStringAsFixed(0)}')),
+                        ]);
+                      }).toList(),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text('إجمالي قيمة المدور عليه: ${_products.fold<double>(0, (sum, p) {
+                    final total = _getCurrentRemainingPieces(p.id);
+                    return sum + (total * _getRetailPrice(p.id));
+                  }).toStringAsFixed(0)}', style: const TextStyle(fontWeight: FontWeight.bold)),
                 ],
               ),
             ),
@@ -627,14 +747,6 @@ class _ShowroomScreenState extends State<ShowroomScreen>
         ],
       ),
     );
-  }
-
-  String _getRemainingDisplay(String productId) {
-    // محاولة قراءة القيمة المحفوظة من الـ entries التي تم تحميلها مسبقاً
-    // لكن لتبسيط نعرض حساباً تقريبياً
-    final load = _getLoadPieces(productId);
-    final ret = _getReturnPieces(productId);
-    return '${load - ret} قطعة';
   }
 
   // ---------- التبويب 2 ----------
@@ -662,18 +774,14 @@ class _ShowroomScreenState extends State<ShowroomScreen>
                   rows: _workers.map((w) {
                     return DataRow(cells: [
                       DataCell(Text(w.name)),
-                      DataCell(Text('${w.dailyExpense}')), // استخدام dailyExpense
+                      DataCell(Text('${w.dailyExpense}')),
                       DataCell(Checkbox(
                           value: _workerReceived[w.id] ?? false,
-                          onChanged: (v) {
-                            setState(() => _workerReceived[w.id] = v ?? false);
-                          })),
-                      DataCell(SizedBox(
-                          width: 80,
-                          child: TextField(
-                              controller: _advanceCtrl[w.id],
-                              keyboardType: TextInputType.number,
-                              onChanged: (_) => setState((){})))),
+                          onChanged: (v) => setState(() => _workerReceived[w.id] = v ?? false))),
+                      DataCell(SizedBox(width: 80, child: TextField(
+                          controller: _advanceCtrl[w.id],
+                          keyboardType: TextInputType.number,
+                          onChanged: (_) => setState((){})))),
                     ]);
                   }).toList(),
                 ),
@@ -709,23 +817,17 @@ class _ShowroomScreenState extends State<ShowroomScreen>
                 padding: const EdgeInsets.all(8),
                 child: Row(
                   children: [
-                    Expanded(
-                      flex: 2,
-                      child: TextField(
-                        controller: row.amountCtrl,
-                        decoration: const InputDecoration(labelText: 'المبلغ', isDense: true),
-                        keyboardType: TextInputType.number,
-                        onChanged: (_) => setState((){}),
-                      ),
-                    ),
+                    Expanded(flex: 2, child: TextField(
+                      controller: row.amountCtrl,
+                      decoration: const InputDecoration(labelText: 'المبلغ', isDense: true),
+                      keyboardType: TextInputType.number,
+                      onChanged: (_) => setState((){}),
+                    )),
                     const SizedBox(width: 8),
-                    Expanded(
-                      flex: 4,
-                      child: TextField(
-                        controller: row.detailsCtrl,
-                        decoration: const InputDecoration(labelText: 'التفاصيل', isDense: true),
-                      ),
-                    ),
+                    Expanded(flex: 4, child: TextField(
+                      controller: row.detailsCtrl,
+                      decoration: const InputDecoration(labelText: 'التفاصيل', isDense: true),
+                    )),
                     IconButton(
                       icon: const Icon(Icons.delete_outline, color: AppTheme.errorColor),
                       onPressed: () => setState(() => _expenseRows.removeAt(i)),
@@ -737,20 +839,14 @@ class _ShowroomScreenState extends State<ShowroomScreen>
           }),
           Row(
             children: [
-              Expanded(
-                child: TextButton.icon(
-                  onPressed: () => setState(() => _expenseRows.add(_DynamicRow(id: _uuid.v4()))),
-                  icon: const Icon(Icons.add),
-                  label: const Text('إضافة صف'),
-                ),
-              ),
-              Expanded(
-                child: ElevatedButton.icon(
-                  onPressed: _saveExpenses,
-                  icon: const Icon(Icons.save),
-                  label: const Text('حفظ الخرج'),
-                ),
-              ),
+              Expanded(child: TextButton.icon(
+                onPressed: () => setState(() => _expenseRows.add(_DynamicRow(id: _uuid.v4()))),
+                icon: const Icon(Icons.add), label: const Text('إضافة صف'),
+              )),
+              Expanded(child: ElevatedButton.icon(
+                onPressed: _saveExpenses,
+                icon: const Icon(Icons.save), label: const Text('حفظ الخرج'),
+              )),
             ],
           ),
         ],
@@ -762,60 +858,120 @@ class _ShowroomScreenState extends State<ShowroomScreen>
   Widget _buildTab4() {
     final showroomExpense = double.tryParse(_showroomExpenseCtrl.text) ?? 0;
     final cashReceived = double.tryParse(_cashReceivedCtrl.text) ?? 0;
-    final otherIncome = double.tryParse(_otherIncomeAmountCtrl.text) ?? 0;
-    final totalDue = _prevRemainingValue +
-        _totalLoadValue -
-        _totalReturnValue +
-        _totalWorkerExpenses +
-        _totalAdvances +
-        _totalDailyExpenses +
-        showroomExpense -
-        otherIncome;
+    
+    final previousDue = _prevRemainingValue + _prevResultAmount;
+    final goodsNet = _totalLoadValue - _totalReturnValue;
+    final totalDueFromGoods = previousDue + goodsNet;
+    
+    final totalExpenses = _totalWorkerExpenses + _totalAdvances + _totalDailyExpenses + _totalSmallLedger + showroomExpense;
+    final totalDue = totalDueFromGoods - totalExpenses;
     final result = totalDue - cashReceived;
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(8),
       child: Column(
         children: [
-          _accountTile('المدور عليه من اليوم السابق', _prevRemainingValue),
-          _accountTile('قيمة السحبيات', _totalLoadValue),
-          _accountTile('قيمة المرتجعات', -_totalReturnValue),
-          _accountTile('صافي حركة البضاعة', _totalLoadValue - _totalReturnValue),
-          _accountTile('مصاريف العمال', _totalWorkerExpenses),
-          _accountTile('البرانيات', _totalAdvances),
-          _accountTile('الخرج اليومي', _totalDailyExpenses, color: AppTheme.errorColor),
-          ListTile(
-            title: const Text('مصروف المعرض'),
-            trailing: SizedBox(
-              width: 100,
-              child: TextField(
-                controller: _showroomExpenseCtrl,
-                keyboardType: TextInputType.number,
-                onChanged: (_) => setState((){}),
-              ),
-            ),
-          ),
-          ListTile(
-            title: const Text('إيرادات أخرى'),
-            trailing: SizedBox(
-              width: 100,
-              child: TextField(
-                controller: _otherIncomeAmountCtrl,
-                keyboardType: TextInputType.number,
-                onChanged: (_) => setState((){}),
-              ),
-            ),
-          ),
+          _accountTile('مدور البضاعة السابق (+)', _prevRemainingValue, color: AppTheme.primaryColor),
+          _accountTile('العجز / الزيادة السابقة (مستحق)', _prevResultAmount,
+              color: _prevResultAmount > 0 ? AppTheme.errorColor : (_prevResultAmount < 0 ? AppTheme.successColor : null)),
+          _accountTile('قيمة السحبيات (+)', _totalLoadValue, color: AppTheme.errorColor),
+          _accountTile('قيمة المرتجعات (-)', -_totalReturnValue, color: AppTheme.successColor),
+          _accountTile('صافي حركة البضاعة اليوم', goodsNet),
+          _accountTile('الالتزام الأساسي من البضاعة', totalDueFromGoods, bold: true),
           const Divider(),
-          _accountTile('المطلوب منه', totalDue, bold: true),
-          ListTile(
-            title: const Text('الواصل نقداً'),
-            trailing: SizedBox(
-              width: 100,
-              child: TextField(
-                controller: _cashReceivedCtrl,
-                keyboardType: TextInputType.number,
-                onChanged: (_) => setState((){}),
+          _accountTile('مصاريف العمال (-)', -_totalWorkerExpenses, color: AppTheme.successColor),
+          _accountTile('البرانيات (-)', -_totalAdvances, color: AppTheme.successColor),
+          _accountTile('الخرج اليومي (-)', -_totalDailyExpenses, color: AppTheme.successColor),
+          _accountTile('إجمالي الكشف الصغير (-)', -_totalSmallLedger, color: AppTheme.successColor),
+          _accountTile('مصروف المعرض (-)', -showroomExpense, color: AppTheme.successColor),
+          
+          // الكشف الصغير (جدول ديناميكي)
+          Card(
+            margin: const EdgeInsets.symmetric(vertical: 8),
+            child: Padding(
+              padding: const EdgeInsets.all(8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('الكشف الصغير', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                  const SizedBox(height: 8),
+                  ...List.generate(_smallLedgerRows.length, (i) {
+                    final row = _smallLedgerRows[i];
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4.0),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            flex: 2,
+                            child: TextField(
+                              controller: row.amountCtrl,
+                              decoration: const InputDecoration(labelText: 'المبلغ', isDense: true, border: OutlineInputBorder()),
+                              keyboardType: TextInputType.number,
+                              onChanged: (_) => setState((){}),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            flex: 4,
+                            child: TextField(
+                              controller: row.detailsCtrl,
+                              decoration: const InputDecoration(labelText: 'التفاصيل', isDense: true, border: OutlineInputBorder()),
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.delete_outline, color: AppTheme.errorColor),
+                            onPressed: () => setState(() => _smallLedgerRows.removeAt(i)),
+                          ),
+                        ],
+                      ),
+                    );
+                  }),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      TextButton.icon(
+                        onPressed: () => setState(() => _smallLedgerRows.add(_DynamicRow(id: _uuid.v4()))),
+                        icon: const Icon(Icons.add), label: const Text('إضافة صف'),
+                      ),
+                      Text('إجمالي الكشف الصغير: $_totalSmallLedger', style: const TextStyle(fontWeight: FontWeight.bold)),
+                      ElevatedButton(
+                        onPressed: _saveSmallLedger,
+                        child: const Text('حفظ الكشف الصغير'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+          
+          Card(
+            child: ListTile(
+              title: const Text('مصروف المعرض'),
+              trailing: SizedBox(
+                width: 120,
+                child: TextField(
+                  controller: _showroomExpenseCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(isDense: true, border: OutlineInputBorder()),
+                  onChanged: (_) => setState((){}),
+                ),
+              ),
+            ),
+          ),
+          const Divider(thickness: 2),
+          _accountTile('إجمالي المطلوب منه النهائي', totalDue, bold: true, color: AppTheme.primaryColor),
+          Card(
+            child: ListTile(
+              title: const Text('الواصل نقداً', style: TextStyle(fontWeight: FontWeight.bold)),
+              trailing: SizedBox(
+                width: 120,
+                child: TextField(
+                  controller: _cashReceivedCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(isDense: true, border: OutlineInputBorder()),
+                  onChanged: (_) => setState((){}),
+                ),
               ),
             ),
           ),
@@ -826,18 +982,14 @@ class _ShowroomScreenState extends State<ShowroomScreen>
           ),
           const Divider(),
           Card(
-            color: (result == 0)
-                ? AppTheme.successColor.withAlpha(20)
-                : AppTheme.errorColor.withAlpha(20),
+            color: (result == 0) ? AppTheme.successColor.withAlpha(30) : AppTheme.errorColor.withAlpha(30),
             child: ListTile(
               title: Text(
                 result > 0 ? 'ضائع / عجز' : (result < 0 ? 'زيادة' : 'الحساب مطابق'),
-                style: const TextStyle(fontWeight: FontWeight.bold),
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
               ),
               trailing: Text('${result.toStringAsFixed(0)}',
-                  style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: result == 0 ? AppTheme.successColor : AppTheme.errorColor)),
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: result == 0 ? AppTheme.successColor : AppTheme.errorColor)),
             ),
           ),
           const SizedBox(height: 16),
@@ -853,11 +1005,12 @@ class _ShowroomScreenState extends State<ShowroomScreen>
   }
 
   Widget _accountTile(String title, double amount, {bool bold = false, Color? color}) {
+    final displayColor = color ?? (amount < 0 ? AppTheme.successColor : null);
     return Card(
       child: ListTile(
         title: Text(title, style: TextStyle(fontWeight: bold ? FontWeight.bold : FontWeight.normal)),
         trailing: Text('${amount.toStringAsFixed(0)}',
-            style: TextStyle(fontWeight: bold ? FontWeight.bold : FontWeight.normal, color: color)),
+            style: TextStyle(fontWeight: bold ? FontWeight.bold : FontWeight.normal, color: displayColor)),
       ),
     );
   }
@@ -910,15 +1063,13 @@ class _ShowroomScreenState extends State<ShowroomScreen>
               Expanded(
                 child: TextButton.icon(
                   onPressed: () => setState(() => _khatRows.add(_KhatRow(id: _uuid.v4()))),
-                  icon: const Icon(Icons.add),
-                  label: const Text('إضافة صف'),
+                  icon: const Icon(Icons.add), label: const Text('إضافة صف'),
                 ),
               ),
               Expanded(
                 child: ElevatedButton.icon(
                   onPressed: _saveKhat,
-                  icon: const Icon(Icons.save),
-                  label: const Text('حفظ القات'),
+                  icon: const Icon(Icons.save), label: const Text('حفظ القات'),
                   style: ElevatedButton.styleFrom(backgroundColor: AppTheme.warningColor),
                 ),
               ),
