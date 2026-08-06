@@ -23,19 +23,33 @@ class ShowroomRepository {
   /// جلب مدور آخر يوم سابق للتاريخ المطلوب (يتحمل الفجوات)
   Future<int> getLastRemainingBeforeDate(String businessDate, String productId) async {
     final db = await _dbHelper.database;
+    // نجلب الإدخال السابق
     final result = await db.query(
       DBConstants.tableShowroomDailyEntries,
-      columns: ['remaining_total_pieces'],
+      columns: ['remaining_boxes', 'remaining_pieces', 'product_id'],
       where: 'business_date < ? AND product_id = ?',
       whereArgs: [businessDate, productId],
       orderBy: 'business_date DESC',
       limit: 1,
     );
     if (result.isEmpty) return 0;
-    return result.first['remaining_total_pieces'] as int? ?? 0;
+    
+    final remainingBoxes = result.first['remaining_boxes'] as int? ?? 0;
+    final remainingPieces = result.first['remaining_pieces'] as int? ?? 0;
+    
+    // نحتاج pieces_per_box من المنتج
+    final product = await db.query(
+      DBConstants.tableProducts,
+      columns: ['pieces_per_box'],
+      where: 'id = ?',
+      whereArgs: [productId],
+    );
+    final boxSize = product.isNotEmpty ? (product.first['pieces_per_box'] as int? ?? 60) : 60;
+    
+    return (remainingBoxes * boxSize) + remainingPieces;
   }
 
-  // جلب مدور الأمس لمنتج معين (تستعمل في الشاشة لعرض أولي، اختيارية)
+  // جلب مدور الأمس لمنتج معين
   Future<int> getYesterdayRemaining(String todayDate, String productId) async {
     return await getLastRemainingBeforeDate(todayDate, productId);
   }
@@ -62,7 +76,6 @@ class ShowroomRepository {
     String? createdBy,
     String? deviceId,
   }) async {
-    // منع التعديل بعد الإغلاق
     if (await isDayClosed(businessDate)) {
       throw Exception('لا يمكن التعديل على يومية مغلقة');
     }
@@ -77,7 +90,6 @@ class ShowroomRepository {
     final returnValue = returnTotalPieces * retailPrice;
     final netValue = loadValue - returnValue;
 
-    // المدور عليه = (مدور آخر يوم سابق) + سحب اليوم - مرتجع اليوم
     final previousRemaining = await getLastRemainingBeforeDate(businessDate, productId);
     final remainingTotalPieces = previousRemaining + loadTotalPieces - returnTotalPieces;
     final remainingBoxes = remainingTotalPieces ~/ boxSize;
@@ -85,19 +97,16 @@ class ShowroomRepository {
     final remainingValue = remainingTotalPieces * retailPrice;
 
     await db.transaction((txn) async {
-      // خصم السحبيات من مخزن الإنتاج
       if (loadTotalPieces > 0) {
         await _deductFromProductionStock(
           txn, productId, loadTotalPieces, businessDate, createdBy, deviceId);
       }
 
-      // إرجاع المرتجعات إلى مخزن الإنتاج
       if (returnTotalPieces > 0) {
         await _addToProductionStock(
           txn, productId, returnTotalPieces, businessDate, createdBy, deviceId);
       }
 
-      // حفظ الحركة اليومية
       final entryData = {
         'business_date': businessDate,
         'product_id': productId,
@@ -129,7 +138,6 @@ class ShowroomRepository {
         await txn.insert(DBConstants.tableShowroomDailyEntries, entryData);
       }
 
-      // تدقيق
       await txn.insert(DBConstants.tableAuditLogs, {
         'id': _uuid.v4(),
         'user_id': createdBy,
@@ -248,7 +256,7 @@ class ShowroomRepository {
           'date': date,
           'created_at': DatabaseHelper.now,
         });
-      } catch (_) {} // ignore duplicate
+      } catch (_) {}
     } else {
       await db.delete(DBConstants.tableWorkerAttendance,
           where: 'worker_id = ? AND date = ?', whereArgs: [workerId, date]);
@@ -376,6 +384,7 @@ class ShowroomRepository {
     required double totalWorkerExpenses,
     required double totalWorkerAdvances,
     required double totalDailyExpenses,
+    required double totalSmallLedger,
     required double otherIncome,
     required double showroomExpense,
     required double totalDue,
@@ -399,7 +408,7 @@ class ShowroomRepository {
       'net_goods_value': netGoodsValue,
       'total_worker_expenses': totalWorkerExpenses,
       'total_worker_advances': totalWorkerAdvances,
-      'total_daily_expenses': totalDailyExpenses,
+      'total_daily_expenses': totalDailyExpenses + totalSmallLedger, // مجتمعين
       'other_income': otherIncome,
       'showroom_expense': showroomExpense,
       'total_due': totalDue,
@@ -449,14 +458,34 @@ class ShowroomRepository {
         });
       }
 
-      // قيد مصروف يومي إجمالي (الخرج اليومي)
+      // قيد مصروف يومي إجمالي (الخرج اليومي فقط، بدون الكشف الصغير)
       if (totalDailyExpenses > 0) {
         await db.insert(DBConstants.tableExpenses, {
           'id': _uuid.v4(),
           'title': 'مصاريف يومية - معرض $businessDate',
           'category': 'مصاريف معرض',
           'amount': totalDailyExpenses,
-          'note': 'إجمالي الخرج اليومي للمعرض (يشمل الكشف الصغير)',
+          'note': 'إجمالي الخرج اليومي للمعرض',
+          'expense_date': businessDate,
+          'status': DBConstants.statusApproved,
+          'approved_by': closedBy ?? createdBy,
+          'created_at': now,
+          'updated_at': now,
+          'created_by': createdBy,
+          'device_id': deviceId,
+          'sync_status': 'Pending',
+          'deleted': 0,
+        });
+      }
+
+      // قيد الكشف الصغير (مصروف منفصل)
+      if (totalSmallLedger > 0) {
+        await db.insert(DBConstants.tableExpenses, {
+          'id': _uuid.v4(),
+          'title': 'كشف صغير - معرض $businessDate',
+          'category': 'مصاريف معرض',
+          'amount': totalSmallLedger,
+          'note': 'إجمالي الكشف الصغير للمعرض',
           'expense_date': businessDate,
           'status': DBConstants.statusApproved,
           'approved_by': closedBy ?? createdBy,
@@ -470,7 +499,6 @@ class ShowroomRepository {
       }
     }
 
-    // تدقيق
     await db.insert(DBConstants.tableAuditLogs, {
       'id': _uuid.v4(),
       'user_id': createdBy,
