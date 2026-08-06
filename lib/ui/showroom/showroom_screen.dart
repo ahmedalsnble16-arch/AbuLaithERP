@@ -61,6 +61,10 @@ class _ShowroomScreenState extends State<ShowroomScreen>
   double _prevRemainingValue = 0.0;   // قيمة مدور البضاعة
   double _prevResultAmount = 0.0;     // العجز/الزيادة المالية من اليوم السابق
 
+  // حالة الإغلاق والصلاحية
+  bool _isDayClosed = false;
+  bool _isAdmin = false; // يجب ربطه بنظام الجلسات
+
   @override
   void initState() {
     super.initState();
@@ -105,6 +109,12 @@ class _ShowroomScreenState extends State<ShowroomScreen>
       row.workerNameCtrl.dispose();
       row.amountCtrl.dispose();
     }
+  }
+
+  /// الحصول على صلاحية المستخدم الحالي (يُستبدل لاحقاً بنظام الجلسات)
+  Future<String> _getCurrentUserRole() async {
+    // TODO: استبدل هذا بجلب حقيقي من SessionManager أو AuthService
+    return 'role_admin'; // حالياً يُعطي صلاحية مدير للتجربة
   }
 
   Future<void> _loadAllData() async {
@@ -178,6 +188,11 @@ class _ShowroomScreenState extends State<ShowroomScreen>
         _cashReceivedCtrl.text = '0';
         _cashConfirmed = false;
       }
+
+      // حالة الإغلاق والصلاحية
+      _isDayClosed = await _showroomRepo.isDayClosed(_businessDate);
+      final role = await _getCurrentUserRole();
+      _isAdmin = (role == 'role_admin');
     } catch (e) {
       debugPrint('Error loading showroom: $e');
     }
@@ -236,6 +251,8 @@ class _ShowroomScreenState extends State<ShowroomScreen>
   }
 
   // ---------- دوال مساعدة ----------
+  bool get _editable => !_isDayClosed;
+
   int _getBoxSize(String productId) {
     final p = _products.firstWhere((e) => e.id == productId,
         orElse: () => Product(id: '', name: '', createdAt: '', updatedAt: ''));
@@ -303,6 +320,7 @@ class _ShowroomScreenState extends State<ShowroomScreen>
 
   // ---------- الحفظ ----------
   Future<void> _saveCurrentTab1() async {
+    if (!_editable) return;
     final Map<String, int> availableStock = {};
     for (var p in _products) {
       availableStock[p.id] = await _showroomRepo.getAvailableStock(p.id);
@@ -360,6 +378,7 @@ class _ShowroomScreenState extends State<ShowroomScreen>
   }
 
   Future<void> _saveTab2() async {
+    if (!_editable) return;
     try {
       for (var w in _workers) {
         final present = _workerReceived[w.id] ?? false;
@@ -401,6 +420,7 @@ class _ShowroomScreenState extends State<ShowroomScreen>
   }
 
   Future<void> _saveExpenses() async {
+    if (!_editable) return;
     try {
       final List<Map<String, dynamic>> list = _expenseRows.map((row) => {
         'id': row.id,
@@ -428,6 +448,7 @@ class _ShowroomScreenState extends State<ShowroomScreen>
   }
 
   Future<void> _saveSmallLedger() async {
+    if (!_editable) return;
     try {
       final List<Map<String, dynamic>> list = _smallLedgerRows.map((row) => {
         'id': row.id,
@@ -455,6 +476,7 @@ class _ShowroomScreenState extends State<ShowroomScreen>
   }
 
   Future<void> _saveKhat() async {
+    if (!_editable) return;
     try {
       final List<Map<String, dynamic>> list = _khatRows.map((row) => {
         'id': row.id,
@@ -482,6 +504,7 @@ class _ShowroomScreenState extends State<ShowroomScreen>
   }
 
   Future<void> _saveAndCloseDay() async {
+    if (!_editable) return;
     final showroomExpense = double.tryParse(_showroomExpenseCtrl.text) ?? 0;
     final cashReceived = double.tryParse(_cashReceivedCtrl.text) ?? 0;
     
@@ -511,7 +534,8 @@ class _ShowroomScreenState extends State<ShowroomScreen>
       netGoodsValue: goodsNet,
       totalWorkerExpenses: _totalWorkerExpenses,
       totalWorkerAdvances: _totalAdvances,
-      totalDailyExpenses: _totalDailyExpenses + _totalSmallLedger,
+      totalDailyExpenses: _totalDailyExpenses,
+      totalSmallLedger: _totalSmallLedger,
       otherIncome: 0,
       showroomExpense: showroomExpense,
       totalDue: totalDue,
@@ -526,10 +550,33 @@ class _ShowroomScreenState extends State<ShowroomScreen>
       deviceId: 'mobile',
     );
 
+    setState(() => _isDayClosed = true);
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('تم حفظ وإغلاق اليوم بنجاح'), backgroundColor: AppTheme.successColor),
       );
+    }
+  }
+
+  Future<void> _confirmCash() async {
+    if (!_editable) return;
+    try {
+      await _showroomRepo.confirmCash(
+        businessDate: _businessDate,
+        confirmed: _cashConfirmed,
+        confirmedBy: 'admin',
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('تم تأكيد النقدية'), backgroundColor: AppTheme.successColor),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('خطأ: $e'), backgroundColor: AppTheme.errorColor),
+        );
+      }
     }
   }
 
@@ -668,18 +715,22 @@ class _ShowroomScreenState extends State<ShowroomScreen>
                       DataCell(Text(p.name)),
                       DataCell(Text('${p.piecesPerBox}')),
                       DataCell(SizedBox(width: 60, child: TextField(
+                          enabled: _editable,
                           controller: _loadBoxesCtrl[p.id],
                           keyboardType: TextInputType.number,
                           onChanged: (_) => setState((){})))),
                       DataCell(SizedBox(width: 60, child: TextField(
+                          enabled: _editable,
                           controller: _loadPiecesCtrl[p.id],
                           keyboardType: TextInputType.number,
                           onChanged: (_) => setState((){})))),
                       DataCell(SizedBox(width: 60, child: TextField(
+                          enabled: _editable,
                           controller: _returnBoxesCtrl[p.id],
                           keyboardType: TextInputType.number,
                           onChanged: (_) => setState((){})))),
                       DataCell(SizedBox(width: 60, child: TextField(
+                          enabled: _editable,
                           controller: _returnPiecesCtrl[p.id],
                           keyboardType: TextInputType.number,
                           onChanged: (_) => setState((){})))),
@@ -739,7 +790,7 @@ class _ShowroomScreenState extends State<ShowroomScreen>
           ),
           const SizedBox(height: 12),
           ElevatedButton.icon(
-            onPressed: _saveCurrentTab1,
+            onPressed: _editable ? _saveCurrentTab1 : null,
             icon: const Icon(Icons.save),
             label: const Text('حفظ حركات السحب والمرتجعات'),
             style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(45)),
@@ -777,8 +828,9 @@ class _ShowroomScreenState extends State<ShowroomScreen>
                       DataCell(Text('${w.dailyExpense}')),
                       DataCell(Checkbox(
                           value: _workerReceived[w.id] ?? false,
-                          onChanged: (v) => setState(() => _workerReceived[w.id] = v ?? false))),
+                          onChanged: _editable ? (v) => setState(() => _workerReceived[w.id] = v ?? false) : null)),
                       DataCell(SizedBox(width: 80, child: TextField(
+                          enabled: _editable,
                           controller: _advanceCtrl[w.id],
                           keyboardType: TextInputType.number,
                           onChanged: (_) => setState((){})))),
@@ -790,7 +842,7 @@ class _ShowroomScreenState extends State<ShowroomScreen>
           ),
           const SizedBox(height: 12),
           ElevatedButton.icon(
-            onPressed: _saveTab2,
+            onPressed: _editable ? _saveTab2 : null,
             icon: const Icon(Icons.save),
             label: const Text('حفظ كشف العمال'),
             style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(45)),
@@ -818,6 +870,7 @@ class _ShowroomScreenState extends State<ShowroomScreen>
                 child: Row(
                   children: [
                     Expanded(flex: 2, child: TextField(
+                      enabled: _editable,
                       controller: row.amountCtrl,
                       decoration: const InputDecoration(labelText: 'المبلغ', isDense: true),
                       keyboardType: TextInputType.number,
@@ -825,30 +878,33 @@ class _ShowroomScreenState extends State<ShowroomScreen>
                     )),
                     const SizedBox(width: 8),
                     Expanded(flex: 4, child: TextField(
+                      enabled: _editable,
                       controller: row.detailsCtrl,
                       decoration: const InputDecoration(labelText: 'التفاصيل', isDense: true),
                     )),
-                    IconButton(
-                      icon: const Icon(Icons.delete_outline, color: AppTheme.errorColor),
-                      onPressed: () => setState(() => _expenseRows.removeAt(i)),
-                    ),
+                    if (_editable)
+                      IconButton(
+                        icon: const Icon(Icons.delete_outline, color: AppTheme.errorColor),
+                        onPressed: () => setState(() => _expenseRows.removeAt(i)),
+                      ),
                   ],
                 ),
               ),
             );
           }),
-          Row(
-            children: [
-              Expanded(child: TextButton.icon(
-                onPressed: () => setState(() => _expenseRows.add(_DynamicRow(id: _uuid.v4()))),
-                icon: const Icon(Icons.add), label: const Text('إضافة صف'),
-              )),
-              Expanded(child: ElevatedButton.icon(
-                onPressed: _saveExpenses,
-                icon: const Icon(Icons.save), label: const Text('حفظ الخرج'),
-              )),
-            ],
-          ),
+          if (_editable)
+            Row(
+              children: [
+                Expanded(child: TextButton.icon(
+                  onPressed: () => setState(() => _expenseRows.add(_DynamicRow(id: _uuid.v4()))),
+                  icon: const Icon(Icons.add), label: const Text('إضافة صف'),
+                )),
+                Expanded(child: ElevatedButton.icon(
+                  onPressed: _saveExpenses,
+                  icon: const Icon(Icons.save), label: const Text('حفظ الخرج'),
+                )),
+              ],
+            ),
         ],
       ),
     );
@@ -904,6 +960,7 @@ class _ShowroomScreenState extends State<ShowroomScreen>
                           Expanded(
                             flex: 2,
                             child: TextField(
+                              enabled: _editable,
                               controller: row.amountCtrl,
                               decoration: const InputDecoration(labelText: 'المبلغ', isDense: true, border: OutlineInputBorder()),
                               keyboardType: TextInputType.number,
@@ -914,32 +971,35 @@ class _ShowroomScreenState extends State<ShowroomScreen>
                           Expanded(
                             flex: 4,
                             child: TextField(
+                              enabled: _editable,
                               controller: row.detailsCtrl,
                               decoration: const InputDecoration(labelText: 'التفاصيل', isDense: true, border: OutlineInputBorder()),
                             ),
                           ),
-                          IconButton(
-                            icon: const Icon(Icons.delete_outline, color: AppTheme.errorColor),
-                            onPressed: () => setState(() => _smallLedgerRows.removeAt(i)),
-                          ),
+                          if (_editable)
+                            IconButton(
+                              icon: const Icon(Icons.delete_outline, color: AppTheme.errorColor),
+                              onPressed: () => setState(() => _smallLedgerRows.removeAt(i)),
+                            ),
                         ],
                       ),
                     );
                   }),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      TextButton.icon(
-                        onPressed: () => setState(() => _smallLedgerRows.add(_DynamicRow(id: _uuid.v4()))),
-                        icon: const Icon(Icons.add), label: const Text('إضافة صف'),
-                      ),
-                      Text('إجمالي الكشف الصغير: $_totalSmallLedger', style: const TextStyle(fontWeight: FontWeight.bold)),
-                      ElevatedButton(
-                        onPressed: _saveSmallLedger,
-                        child: const Text('حفظ الكشف الصغير'),
-                      ),
-                    ],
-                  ),
+                  if (_editable)
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        TextButton.icon(
+                          onPressed: () => setState(() => _smallLedgerRows.add(_DynamicRow(id: _uuid.v4()))),
+                          icon: const Icon(Icons.add), label: const Text('إضافة صف'),
+                        ),
+                        Text('إجمالي الكشف الصغير: $_totalSmallLedger', style: const TextStyle(fontWeight: FontWeight.bold)),
+                        ElevatedButton(
+                          onPressed: _saveSmallLedger,
+                          child: const Text('حفظ الكشف الصغير'),
+                        ),
+                      ],
+                    ),
                 ],
               ),
             ),
@@ -951,6 +1011,7 @@ class _ShowroomScreenState extends State<ShowroomScreen>
               trailing: SizedBox(
                 width: 120,
                 child: TextField(
+                  enabled: _editable,
                   controller: _showroomExpenseCtrl,
                   keyboardType: TextInputType.number,
                   decoration: const InputDecoration(isDense: true, border: OutlineInputBorder()),
@@ -967,6 +1028,7 @@ class _ShowroomScreenState extends State<ShowroomScreen>
               trailing: SizedBox(
                 width: 120,
                 child: TextField(
+                  enabled: _editable,
                   controller: _cashReceivedCtrl,
                   keyboardType: TextInputType.number,
                   decoration: const InputDecoration(isDense: true, border: OutlineInputBorder()),
@@ -975,42 +1037,61 @@ class _ShowroomScreenState extends State<ShowroomScreen>
               ),
             ),
           ),
-          CheckboxListTile(
-            title: const Text('تأكيد استلام النقدية'),
-            value: _cashConfirmed,
-            onChanged: (v) => setState(() => _cashConfirmed = v ?? false),
-          ),
+          if (_isAdmin)
+            CheckboxListTile(
+              title: const Text('تأكيد استلام النقدية (صلاحية المدير)'),
+              value: _cashConfirmed,
+              onChanged: _editable ? (v) {
+                setState(() => _cashConfirmed = v ?? false);
+                _confirmCash();
+              } : null,
+            )
+          else
+            ListTile(
+              title: const Text('النقدية غير مؤكدة'),
+              subtitle: const Text('تحتاج صلاحية المدير للتأكيد'),
+              trailing: Icon(_cashConfirmed ? Icons.check_circle : Icons.cancel,
+                  color: _cashConfirmed ? AppTheme.successColor : AppTheme.warningColor),
+            ),
           const Divider(),
           Card(
-            color: (result == 0) ? AppTheme.successColor.withAlpha(30) : AppTheme.errorColor.withAlpha(30),
-            child: ListTile(
-              title: Text(
-                result > 0 ? 'ضائع / عجز' : (result < 0 ? 'زيادة' : 'الحساب مطابق'),
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+            color: (result == 0)
+                ? Colors.green.shade50
+                : (result > 0 ? Colors.red.shade50 : Colors.blue.shade50),
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'النتيجة: ${result > 0 ? "عجز" : (result < 0 ? "زيادة" : "مطابق")}',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: (result == 0)
+                          ? AppTheme.successColor
+                          : (result > 0 ? AppTheme.errorColor : AppTheme.primaryColor),
+                    ),
+                  ),
+                  Text(
+                    '${result.abs().toStringAsFixed(2)} ريال',
+                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                ],
               ),
-              trailing: Text('${result.toStringAsFixed(0)}',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: result == 0 ? AppTheme.successColor : AppTheme.errorColor)),
             ),
           ),
           const SizedBox(height: 16),
           ElevatedButton.icon(
-            onPressed: _saveAndCloseDay,
+            onPressed: _editable ? _saveAndCloseDay : null,
             icon: const Icon(Icons.lock),
-            label: const Text('حفظ وإغلاق اليوم'),
-            style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(45)),
+            label: const Text('حفظ وإغلاق اليومية'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.primaryColor,
+              minimumSize: const Size.fromHeight(50),
+            ),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _accountTile(String title, double amount, {bool bold = false, Color? color}) {
-    final displayColor = color ?? (amount < 0 ? AppTheme.successColor : null);
-    return Card(
-      child: ListTile(
-        title: Text(title, style: TextStyle(fontWeight: bold ? FontWeight.bold : FontWeight.normal)),
-        trailing: Text('${amount.toStringAsFixed(0)}',
-            style: TextStyle(fontWeight: bold ? FontWeight.bold : FontWeight.normal, color: displayColor)),
       ),
     );
   }
@@ -1020,9 +1101,8 @@ class _ShowroomScreenState extends State<ShowroomScreen>
     return SingleChildScrollView(
       padding: const EdgeInsets.all(8),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _summaryCard('إجمالي قات العمال', _totalKhat, AppTheme.warningColor),
+          _summaryCard('إجمالي القات', _totalKhat, AppTheme.warningColor),
           const SizedBox(height: 8),
           ...List.generate(_khatRows.length, (i) {
             final row = _khatRows[i];
@@ -1033,8 +1113,9 @@ class _ShowroomScreenState extends State<ShowroomScreen>
                 child: Row(
                   children: [
                     Expanded(
-                      flex: 2,
+                      flex: 3,
                       child: TextField(
+                        enabled: _editable,
                         controller: row.workerNameCtrl,
                         decoration: const InputDecoration(labelText: 'اسم العامل', isDense: true),
                       ),
@@ -1043,38 +1124,42 @@ class _ShowroomScreenState extends State<ShowroomScreen>
                     Expanded(
                       flex: 2,
                       child: TextField(
+                        enabled: _editable,
                         controller: row.amountCtrl,
                         decoration: const InputDecoration(labelText: 'المبلغ', isDense: true),
                         keyboardType: TextInputType.number,
-                        onChanged: (_) => setState((){}),
+                        onChanged: (_) => setState(() {}),
                       ),
                     ),
-                    IconButton(
-                      icon: const Icon(Icons.delete_outline, color: AppTheme.errorColor),
-                      onPressed: () => setState(() => _khatRows.removeAt(i)),
-                    ),
+                    if (_editable)
+                      IconButton(
+                        icon: const Icon(Icons.delete_outline, color: AppTheme.errorColor),
+                        onPressed: () => setState(() => _khatRows.removeAt(i)),
+                      ),
                   ],
                 ),
               ),
             );
           }),
-          Row(
-            children: [
-              Expanded(
-                child: TextButton.icon(
-                  onPressed: () => setState(() => _khatRows.add(_KhatRow(id: _uuid.v4()))),
-                  icon: const Icon(Icons.add), label: const Text('إضافة صف'),
+          if (_editable)
+            Row(
+              children: [
+                Expanded(
+                  child: TextButton.icon(
+                    onPressed: () => setState(() => _khatRows.add(_KhatRow(id: _uuid.v4()))),
+                    icon: const Icon(Icons.add),
+                    label: const Text('إضافة عامل'),
+                  ),
                 ),
-              ),
-              Expanded(
-                child: ElevatedButton.icon(
-                  onPressed: _saveKhat,
-                  icon: const Icon(Icons.save), label: const Text('حفظ القات'),
-                  style: ElevatedButton.styleFrom(backgroundColor: AppTheme.warningColor),
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: _saveKhat,
+                    icon: const Icon(Icons.save),
+                    label: const Text('حفظ القات'),
+                  ),
                 ),
-              ),
-            ],
-          ),
+              ],
+            ),
         ],
       ),
     );
@@ -1083,16 +1168,40 @@ class _ShowroomScreenState extends State<ShowroomScreen>
   Widget _summaryCard(String title, double amount, Color color) {
     return Expanded(
       child: Card(
+        color: color.withAlpha(20),
         child: Padding(
           padding: const EdgeInsets.all(12),
           child: Column(
             children: [
               Text(title, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
               const SizedBox(height: 4),
-              Text('${amount.toStringAsFixed(0)}',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: color)),
+              Text(
+                amount.toStringAsFixed(0),
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: color),
+              ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _accountTile(String title, double amount, {bool bold = false, Color? color}) {
+    return ListTile(
+      dense: true,
+      title: Text(
+        title,
+        style: TextStyle(
+          fontWeight: bold ? FontWeight.bold : FontWeight.normal,
+          fontSize: bold ? 15 : 13,
+        ),
+      ),
+      trailing: Text(
+        amount.toStringAsFixed(2),
+        style: TextStyle(
+          fontWeight: bold ? FontWeight.bold : FontWeight.normal,
+          fontSize: bold ? 15 : 13,
+          color: color,
         ),
       ),
     );
