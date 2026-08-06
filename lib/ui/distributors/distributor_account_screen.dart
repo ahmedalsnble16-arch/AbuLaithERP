@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../../config/theme.dart';
+import 'package:uuid/uuid.dart';
 import '../../core/constants/db_constants.dart';
 import '../../core/database/database_helper.dart';
 import '../../data/models/distributor.dart';
@@ -25,45 +25,39 @@ class _DistributorAccountScreenState extends State<DistributorAccountScreen> {
   bool _isLoading = true;
   List<Map<String, dynamic>> _previousLoads = [];
 
-  // ----- بيانات الحملة المفتوحة حاليًا -----
+  // ----- بيانات الحملة الحالية -----
   String? _currentLoadId;
   String? _currentLoadDate;
   String? _currentLoadStatus;
 
-  // ----- حقول التحميل (السلال والقطع) -----
-  Map<String, TextEditingController> _boxesControllers = {};
-  Map<String, TextEditingController> _piecesControllers = {};
+  // ----- المتحكمات (Controllers) -----
+  final Map<String, TextEditingController> _boxesControllers = {};
+  final Map<String, TextEditingController> _piecesControllers = {};
 
-  // ----- حقول المرتجعات (لكل منتج) -----
-  Map<String, TextEditingController> _returnedBoxesCtrl = {};
-  Map<String, TextEditingController> _returnedPiecesCtrl = {};
+  final Map<String, TextEditingController> _returnedBoxesCtrl = {};
+  final Map<String, TextEditingController> _returnedPiecesCtrl = {};
 
-  // ----- حقول التالف (لكل منتج) -----
-  Map<String, TextEditingController> _damagedBoxesCtrl = {};
-  Map<String, TextEditingController> _damagedPiecesCtrl = {};
-  Map<String, TextEditingController> _damagedPriceCtrl = {};
+  final Map<String, TextEditingController> _damagedBoxesCtrl = {};
+  final Map<String, TextEditingController> _damagedPiecesCtrl = {};
+  final Map<String, TextEditingController> _damagedPriceCtrl = {};
 
-  // ----- حقول النقد والخصم -----
   final TextEditingController _cashCtrl = TextEditingController();
-  final TextEditingController _discountPercentCtrl = TextEditingController();
 
-  // ----- الأرصدة -----
-  double _collectedCash = 0;
-  double _returnedValue = 0;
-  double _damagedValue = 0;
+  // ----- الأرصدة للحملة الحالية فقط -----
+  double _loadTotalValue = 0;
+  double _returnedTotalValue = 0;
+  double _damagedTotalValue = 0;
 
   @override
   void initState() {
     super.initState();
-    _discountPercentCtrl.text = '${widget.distributor.commissionPercent}';
-    _loadData();
+    _loadInitialData();
   }
 
-  Future<void> _loadData() async {
+  Future<void> _loadInitialData() async {
     setState(() => _isLoading = true);
     try {
       final db = await DatabaseHelper().database;
-
       final products = await _productRepo.getAll();
 
       for (var p in products) {
@@ -72,20 +66,26 @@ class _DistributorAccountScreenState extends State<DistributorAccountScreen> {
 
       _prevBalance = widget.distributor.currentBalance;
 
+      // جلب الحملات السابقة
       final prevLoads = await db.query(
         DBConstants.tableDistributorLoads,
         where: 'distributor_id = ?',
         whereArgs: [widget.distributor.id],
         orderBy: 'created_at DESC',
-        limit: 20,
       );
 
-      setState(() {
-        _products = products.where((p) => p.active).toList();
-        _previousLoads = prevLoads;
-        _initControllers();
-        _isLoading = false;
-      });
+      _products = products.where((p) => p.active).toList();
+      _previousLoads = prevLoads;
+      _initControllers();
+
+      // فتح أحدث حملة إن وجدت أو تجهيز حملة جديدة
+      if (prevLoads.isNotEmpty) {
+        await _loadLoadDetails(prevLoads.first['id'] as String);
+      } else {
+        _createNewLoad();
+      }
+
+      setState(() => _isLoading = false);
     } catch (e) {
       setState(() => _isLoading = false);
     }
@@ -93,20 +93,34 @@ class _DistributorAccountScreenState extends State<DistributorAccountScreen> {
 
   void _initControllers() {
     for (var p in _products) {
-      _boxesControllers[p.id] ??= TextEditingController();
-      _piecesControllers[p.id] ??= TextEditingController();
-      _returnedBoxesCtrl[p.id] ??= TextEditingController();
-      _returnedPiecesCtrl[p.id] ??= TextEditingController();
-      _damagedBoxesCtrl[p.id] ??= TextEditingController();
-      _damagedPiecesCtrl[p.id] ??= TextEditingController();
-      _damagedPriceCtrl[p.id] ??= TextEditingController();
+      _boxesControllers[p.id] = TextEditingController();
+      _piecesControllers[p.id] = TextEditingController();
+      _returnedBoxesCtrl[p.id] = TextEditingController();
+      _returnedPiecesCtrl[p.id] = TextEditingController();
+      _damagedBoxesCtrl[p.id] = TextEditingController();
+      _damagedPiecesCtrl[p.id] = TextEditingController();
+      _damagedPriceCtrl[p.id] = TextEditingController();
     }
   }
 
-  // ============ دوال المساعدة ============
+  void _clearAllFields() {
+    for (var p in _products) {
+      _boxesControllers[p.id]?.clear();
+      _piecesControllers[p.id]?.clear();
+      _returnedBoxesCtrl[p.id]?.clear();
+      _returnedPiecesCtrl[p.id]?.clear();
+      _damagedBoxesCtrl[p.id]?.clear();
+      _damagedPiecesCtrl[p.id]?.clear();
+      _damagedPriceCtrl[p.id]?.clear();
+    }
+    _cashCtrl.clear();
+    _loadTotalValue = 0;
+    _returnedTotalValue = 0;
+    _damagedTotalValue = 0;
+  }
+
   int _boxSize(String productId) {
-    final p = _products.firstWhere((x) => x.id == productId);
-    return p.piecesPerBox;
+    return _products.firstWhere((x) => x.id == productId).piecesPerBox;
   }
 
   int _parsePieces(TextEditingController? boxesCtrl, TextEditingController? piecesCtrl, int boxSize) {
@@ -122,48 +136,114 @@ class _DistributorAccountScreenState extends State<DistributorAccountScreen> {
     return '$boxes.$remaining';
   }
 
-  // ============ فتح حملة سابقة ============
-  Future<void> _openPreviousLoad(String loadId, String loadDate, String status) async {
-    setState(() {
-      _currentLoadId = loadId;
-      _currentLoadDate = loadDate;
-      _currentLoadStatus = status;
-      for (var p in _products) {
-        _boxesControllers[p.id]?.text = '';
-        _piecesControllers[p.id]?.text = '';
-        _returnedBoxesCtrl[p.id]?.text = '';
-        _returnedPiecesCtrl[p.id]?.text = '';
-        _damagedBoxesCtrl[p.id]?.text = '';
-        _damagedPiecesCtrl[p.id]?.text = '';
-        _damagedPriceCtrl[p.id]?.text = '';
+  // ============ تحميل تفاصيل حملة كاملة من الأرشيف ============
+  Future<void> _loadLoadDetails(String loadId) async {
+    final db = await DatabaseHelper().database;
+    _clearAllFields();
+
+    final loadData = await db.query(
+      DBConstants.tableDistributorLoads,
+      where: 'id = ?',
+      whereArgs: [loadId],
+    );
+
+    if (loadData.isEmpty) return;
+
+    final load = loadData.first;
+    _currentLoadId = loadId;
+    _currentLoadDate = load['load_date'] as String?;
+    _currentLoadStatus = load['status'] as String?;
+
+    // 1. تحميل مفردات التحميل
+    final loadItems = await db.query(
+      DBConstants.tableDistributorLoadItems,
+      where: 'load_id = ?',
+      whereArgs: [loadId],
+    );
+
+    for (var item in loadItems) {
+      final pid = item['product_id'] as String;
+      final totalQty = item['quantity'] as int;
+      final bSize = _boxSize(pid);
+      if (_boxesControllers.containsKey(pid)) {
+        _boxesControllers[pid]!.text = (totalQty ~/ bSize).toString();
+        _piecesControllers[pid]!.text = (totalQty % bSize).toString();
       }
-      _cashCtrl.text = '';
-      _collectedCash = 0;
-      _returnedValue = 0;
-      _damagedValue = 0;
-    });
+    }
+
+    // 2. تحميل المرتجعات للحملة الحالية فقط
+    final returns = await db.query(
+      DBConstants.tableDistributorLoadReturns,
+      where: 'load_id = ?',
+      whereArgs: [loadId],
+    );
+
+    for (var item in returns) {
+      final pid = item['product_id'] as String;
+      final boxes = item['boxes'] as int? ?? 0;
+      final pieces = item['pieces'] as int? ?? 0;
+      if (_returnedBoxesCtrl.containsKey(pid)) {
+        _returnedBoxesCtrl[pid]!.text = boxes.toString();
+        _returnedPiecesCtrl[pid]!.text = pieces.toString();
+      }
+    }
+
+    // 3. تحميل التالف للحملة الحالية فقط
+    final damages = await db.query(
+      DBConstants.tableDistributorLoadDamage,
+      where: 'load_id = ?',
+      whereArgs: [loadId],
+    );
+
+    for (var item in damages) {
+      final pid = item['product_id'] as String? ?? '';
+      final pieces = item['pieces'] as int? ?? 0;
+      final price = (item['price_per_piece'] as num? ?? 0).toDouble();
+      final bSize = _boxSize(pid);
+
+      if (_damagedBoxesCtrl.containsKey(pid)) {
+        _damagedBoxesCtrl[pid]!.text = (pieces ~/ bSize).toString();
+        _damagedPiecesCtrl[pid]!.text = (pieces % bSize).toString();
+        _damagedPriceCtrl[pid]!.text = price.toStringAsFixed(0);
+      }
+    }
+
+    _calculateTotals();
+    setState(() {});
+  }
+
+  void _calculateTotals() {
+    double loadVal = 0;
+    double retVal = 0;
+    double damVal = 0;
+
+    for (var p in _products) {
+      final price = _pricesForDistributor[p.id] ?? 0;
+      final bSize = p.piecesPerBox;
+
+      final loadQty = _parsePieces(_boxesControllers[p.id], _piecesControllers[p.id], bSize);
+      loadVal += loadQty * price;
+
+      final retQty = _parsePieces(_returnedBoxesCtrl[p.id], _returnedPiecesCtrl[p.id], bSize);
+      retVal += retQty * price;
+
+      final damQty = _parsePieces(_damagedBoxesCtrl[p.id], _damagedPiecesCtrl[p.id], bSize);
+      final damPrice = double.tryParse(_damagedPriceCtrl[p.id]?.text ?? '') ?? 0;
+      damVal += damQty * damPrice;
+    }
+
+    _loadTotalValue = loadVal;
+    _returnedTotalValue = retVal;
+    _damagedTotalValue = damVal;
   }
 
   // ============ إنشاء حملة جديدة ============
-  Future<void> _createNewLoad() async {
-    final now = DateTime.now().toIso8601String().substring(0, 10);
+  void _createNewLoad() {
+    _clearAllFields();
     setState(() {
       _currentLoadId = null;
-      _currentLoadDate = now;
+      _currentLoadDate = DateTime.now().toIso8601String().substring(0, 10);
       _currentLoadStatus = 'مفتوحة';
-      for (var p in _products) {
-        _boxesControllers[p.id]?.text = '';
-        _piecesControllers[p.id]?.text = '';
-        _returnedBoxesCtrl[p.id]?.text = '';
-        _returnedPiecesCtrl[p.id]?.text = '';
-        _damagedBoxesCtrl[p.id]?.text = '';
-        _damagedPiecesCtrl[p.id]?.text = '';
-        _damagedPriceCtrl[p.id]?.text = '';
-      }
-      _cashCtrl.text = '';
-      _collectedCash = 0;
-      _returnedValue = 0;
-      _damagedValue = 0;
     });
   }
 
@@ -176,8 +256,9 @@ class _DistributorAccountScreenState extends State<DistributorAccountScreen> {
         items.add({'productId': p.id, 'quantity': qty});
       }
     }
+
     if (items.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('أضف كميات للتحميل')));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('أدخل كميات للتحميل أولاً')));
       return;
     }
 
@@ -186,69 +267,83 @@ class _DistributorAccountScreenState extends State<DistributorAccountScreen> {
         distributorId: widget.distributor.id,
         items: items,
       );
-      setState(() {
-        _currentLoadId = loadId;
-        _currentLoadDate = DateTime.now().toIso8601String().substring(0, 10);
-        _currentLoadStatus = 'مفتوحة';
-      });
+      await _loadInitialData();
+      await _loadLoadDetails(loadId);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم حفظ التحميل'), backgroundColor: AppTheme.successColor));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم حفظ التحميل بنجاح'), backgroundColor: Colors.green));
       }
-      _loadData();
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('خطأ: $e'), backgroundColor: AppTheme.errorColor));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('خطأ أثناء الحفظ: $e'), backgroundColor: Colors.red));
       }
     }
   }
 
-  // ============ حفظ المرتجعات ============
+  // ============ ثانياً: حفظ وتعديل المرتجعات وترحيل الفرق لمخزن الإنتاج ============
   Future<void> _saveReturns() async {
     if (_currentLoadId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('لا توجد حملة مفتوحة')));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('يرجى إنشاء وحفظ التحميل أولاً')));
       return;
     }
+
     final db = await DatabaseHelper().database;
     final now = DatabaseHelper.now;
 
     try {
       await db.transaction((txn) async {
         for (var p in _products) {
-          final returned = _parsePieces(_returnedBoxesCtrl[p.id], _returnedPiecesCtrl[p.id], _boxSize(p.id));
-          if (returned <= 0) continue;
+          final boxes = int.tryParse(_returnedBoxesCtrl[p.id]?.text ?? '') ?? 0;
+          final pieces = int.tryParse(_returnedPiecesCtrl[p.id]?.text ?? '') ?? 0;
+          final totalPieces = _parsePieces(_returnedBoxesCtrl[p.id], _returnedPiecesCtrl[p.id], _boxSize(p.id));
+          final unitPrice = _pricesForDistributor[p.id] ?? 0;
+          final totalValue = totalPieces * unitPrice;
 
+          // 1. البحث عن سجّل مرتجع سابق مرتبط بهذه الحملة والمنتج حصراً
           final existing = await txn.query(
-            DBConstants.tableDistributorReturns,
+            DBConstants.tableDistributorLoadReturns,
             where: 'load_id = ? AND product_id = ?',
             whereArgs: [_currentLoadId, p.id],
           );
 
-          int oldReturned = 0;
+          int oldReturnedPieces = 0;
+
           if (existing.isNotEmpty) {
-            oldReturned = existing.first['returned'] as int? ?? 0;
-            await txn.update(
-              DBConstants.tableDistributorReturns,
-              {
-                'returned': returned,
-                'settlement_date': DateTime.now().toIso8601String().substring(0, 10),
-                'created_at': now,
-              },
-              where: 'load_id = ? AND product_id = ?',
-              whereArgs: [_currentLoadId, p.id],
-            );
-          } else {
-            await txn.insert(DBConstants.tableDistributorReturns, {
-              'id': DateTime.now().millisecondsSinceEpoch.toString(),
+            oldReturnedPieces = existing.first['total_pieces'] as int? ?? 0;
+
+            if (totalPieces > 0) {
+              await txn.update(
+                DBConstants.tableDistributorLoadReturns,
+                {
+                  'boxes': boxes,
+                  'pieces': pieces,
+                  'total_pieces': totalPieces,
+                  'unit_price': unitPrice,
+                  'total_value': totalValue,
+                  'return_date': _currentLoadDate,
+                  'created_at': now,
+                },
+                where: 'id = ?',
+                whereArgs: [existing.first['id']],
+              );
+            } else {
+              await txn.delete(
+                DBConstants.tableDistributorLoadReturns,
+                where: 'id = ?',
+                whereArgs: [existing.first['id']],
+              );
+            }
+          } else if (totalPieces > 0) {
+            await txn.insert(DBConstants.tableDistributorLoadReturns, {
+              'id': const Uuid().v4(),
               'distributor_id': widget.distributor.id,
               'load_id': _currentLoadId,
               'product_id': p.id,
-              'sold': 0,
-              'returned': returned,
-              'damaged': 0,
-              'collected_cash': 0,
-              'commission': 0,
-              'net_amount': 0,
-              'settlement_date': DateTime.now().toIso8601String().substring(0, 10),
+              'boxes': boxes,
+              'pieces': pieces,
+              'total_pieces': totalPieces,
+              'unit_price': unitPrice,
+              'total_value': totalValue,
+              'return_date': _currentLoadDate,
               'created_at': now,
               'created_by': 'admin',
               'device_id': 'mobile',
@@ -256,89 +351,118 @@ class _DistributorAccountScreenState extends State<DistributorAccountScreen> {
             });
           }
 
-          final diff = returned - oldReturned;
+          // 2. تصحيح المخزون بالفرق فقط (diff)
+          final diff = totalPieces - oldReturnedPieces;
           if (diff != 0) {
-            final stock = await txn.query(DBConstants.tableStock, where: 'product_id = ?', whereArgs: [p.id]);
-            if (stock.isNotEmpty) {
-              final currentQty = stock.first['quantity_pieces'] as int? ?? 0;
+            final stockRes = await txn.query(DBConstants.tableStock, where: 'product_id = ?', whereArgs: [p.id]);
+
+            if (stockRes.isNotEmpty) {
+              final currentStock = stockRes.first['quantity_pieces'] as int? ?? 0;
               await txn.update(
                 DBConstants.tableStock,
-                {'quantity_pieces': currentQty + diff, 'updated_at': now},
+                {
+                  'quantity_pieces': currentStock + diff,
+                  'updated_at': now,
+                },
                 where: 'product_id = ?',
                 whereArgs: [p.id],
               );
+            } else {
+              await txn.insert(DBConstants.tableStock, {
+                'id': const Uuid().v4(),
+                'product_id': p.id,
+                'quantity_pieces': diff,
+                'reserved_quantity': 0,
+                'average_cost': p.productionCost,
+                'last_update': now,
+                'created_at': now,
+                'updated_at': now,
+              });
             }
+
+            // تسجل حركة مخزون بالفرق
             await txn.insert(DBConstants.tableStockMovements, {
-              'id': DateTime.now().millisecondsSinceEpoch.toString(),
+              'id': const Uuid().v4(),
               'product_id': p.id,
               'movement_type': 'مرتجع موزع',
               'quantity': diff,
               'reference_id': _currentLoadId,
               'reference_type': 'distributor_return',
-              'notes': 'مرتجع موزع - حملة $_currentLoadId',
+              'notes': 'تعديل مرتجع الموزع: ${widget.distributor.name} (حملة $_currentLoadId)',
               'created_at': now,
               'sync_status': 'Pending',
             });
           }
         }
       });
+
+      _calculateTotals();
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم حفظ المرتجعات'), backgroundColor: AppTheme.successColor));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم حفظ المرتجعات وتحديث مخزن الإنتاج بنجاح'), backgroundColor: Colors.green));
       }
-      _loadData();
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('خطأ: $e'), backgroundColor: AppTheme.errorColor));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('خطأ أثناء حفظ المرتجعات: $e'), backgroundColor: Colors.red));
       }
     }
   }
 
-  // ============ حفظ التالف ============
+  // ============ رابعاً: حفظ التالف مع السعر وتحديد القيمة للحملة فقط ============
   Future<void> _saveDamaged() async {
     if (_currentLoadId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('لا توجد حملة مفتوحة')));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('يرجى إنشاء وحفظ التحميل أولاً')));
       return;
     }
+
     final db = await DatabaseHelper().database;
     final now = DatabaseHelper.now;
 
     try {
       await db.transaction((txn) async {
         for (var p in _products) {
-          final damagedQty = _parsePieces(_damagedBoxesCtrl[p.id], _damagedPiecesCtrl[p.id], _boxSize(p.id));
-          final price = double.tryParse(_damagedPriceCtrl[p.id]?.text ?? '') ?? 0;
-          if (damagedQty <= 0 && price <= 0) continue;
+          final damagedPieces = _parsePieces(_damagedBoxesCtrl[p.id], _damagedPiecesCtrl[p.id], _boxSize(p.id));
+          final pricePerPiece = double.tryParse(_damagedPriceCtrl[p.id]?.text ?? '') ?? 0;
+          final totalValue = damagedPieces * pricePerPiece;
 
           final existing = await txn.query(
-            DBConstants.tableDistributorReturns,
+            DBConstants.tableDistributorLoadDamage,
             where: 'load_id = ? AND product_id = ?',
             whereArgs: [_currentLoadId, p.id],
           );
 
           if (existing.isNotEmpty) {
-            await txn.update(
-              DBConstants.tableDistributorReturns,
-              {
-                'damaged': damagedQty,
-                'commission': price * damagedQty,
-                'created_at': now,
-              },
-              where: 'load_id = ? AND product_id = ?',
-              whereArgs: [_currentLoadId, p.id],
-            );
-          } else {
-            await txn.insert(DBConstants.tableDistributorReturns, {
-              'id': DateTime.now().millisecondsSinceEpoch.toString(),
+            if (damagedPieces > 0) {
+              await txn.update(
+                DBConstants.tableDistributorLoadDamage,
+                {
+                  'damage_type': 'تالف موزع',
+                  'pieces': damagedPieces,
+                  'price_per_piece': pricePerPiece,
+                  'total_value': totalValue,
+                  'damage_date': _currentLoadDate,
+                  'created_at': now,
+                },
+                where: 'id = ?',
+                whereArgs: [existing.first['id']],
+              );
+            } else {
+              await txn.delete(
+                DBConstants.tableDistributorLoadDamage,
+                where: 'id = ?',
+                whereArgs: [existing.first['id']],
+              );
+            }
+          } else if (damagedPieces > 0) {
+            await txn.insert(DBConstants.tableDistributorLoadDamage, {
+              'id': const Uuid().v4(),
               'distributor_id': widget.distributor.id,
               'load_id': _currentLoadId,
               'product_id': p.id,
-              'sold': 0,
-              'returned': 0,
-              'damaged': damagedQty,
-              'collected_cash': 0,
-              'commission': price * damagedQty,
-              'net_amount': 0,
-              'settlement_date': DateTime.now().toIso8601String().substring(0, 10),
+              'damage_type': 'تالف موزع',
+              'pieces': damagedPieces,
+              'price_per_piece': pricePerPiece,
+              'total_value': totalValue,
+              'damage_date': _currentLoadDate,
               'created_at': now,
               'created_by': 'admin',
               'device_id': 'mobile',
@@ -347,24 +471,23 @@ class _DistributorAccountScreenState extends State<DistributorAccountScreen> {
           }
         }
       });
+
+      _calculateTotals();
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم حفظ التالف'), backgroundColor: AppTheme.successColor));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم حفظ التالف وتقييم قيمته بنجاح'), backgroundColor: Colors.green));
       }
-      _loadData();
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('خطأ: $e'), backgroundColor: AppTheme.errorColor));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('خطأ أثناء حفظ التالف: $e'), backgroundColor: Colors.red));
       }
     }
   }
 
-  // ============ تصفية وإغلاق الحملة ============
+  // ============ التصفية وإغلاق الحملة ============
   Future<void> _settleLoad() async {
-    if (_currentLoadId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('لا توجد حملة مفتوحة')));
-      return;
-    }
+    if (_currentLoadId == null) return;
     final cash = double.tryParse(_cashCtrl.text) ?? 0;
+
     try {
       await _distRepo.settleDistributor(
         distributorId: widget.distributor.id,
@@ -372,51 +495,22 @@ class _DistributorAccountScreenState extends State<DistributorAccountScreen> {
         items: [],
         collectedCash: cash,
       );
-      setState(() {
-        _currentLoadStatus = 'مغلقة';
-      });
+      await _loadInitialData();
+      await _loadLoadDetails(_currentLoadId!);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تمت التصفية'), backgroundColor: AppTheme.successColor));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تمت تصفية وإغلاق الحملة بنجاح'), backgroundColor: Colors.green));
       }
-      _loadData();
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('خطأ: $e'), backgroundColor: AppTheme.errorColor));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('خطأ أثناء التصفية: $e'), backgroundColor: Colors.red));
       }
     }
   }
 
-  // ============ تفاصيل حملة سابقة ============
-  Future<void> _showLoadDetails(String loadId) async {
-    final db = await DatabaseHelper().database;
-    final returns = await db.query(DBConstants.tableDistributorReturns, where: 'load_id = ?', whereArgs: [loadId]);
-
-    if (!mounted) return;
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('تفاصيل الحملة'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ...returns.map((r) => ListTile(
-                title: Text('المنتج: ${r['product_id']}'),
-                subtitle: Text('مرتجع: ${r['returned']} | تالف: ${r['damaged']} | قيمة التالف: ${r['commission']}'),
-              )),
-            ],
-          ),
-        ),
-        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إغلاق'))],
-      ),
-    );
-  }
-
-  // ============ واجهة المستخدم ============
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('كشف حساب: ${widget.distributor.name}')),
+      appBar: AppBar(title: Text('كشف حساب الموزع: ${widget.distributor.name}')),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : SingleChildScrollView(
@@ -424,21 +518,22 @@ class _DistributorAccountScreenState extends State<DistributorAccountScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // رأس الكشف
+                  // بطاقة بيانات الموزع
                   Card(
+                    elevation: 3,
                     child: Padding(
                       padding: const EdgeInsets.all(12),
                       child: Column(
                         children: [
                           Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
-                            _infoCard('الموزع', widget.distributor.name, Icons.person),
-                            _infoCard('السيارة', widget.distributor.vehicle ?? '-', Icons.local_shipping),
-                            _infoCard('نسبة الخصم', '%${widget.distributor.commissionPercent}', Icons.discount),
+                            _infoTile('الموزع', widget.distributor.name, Icons.person),
+                            _infoTile('السيارة', widget.distributor.vehicle ?? '-', Icons.local_shipping),
+                            _infoTile('العمولة', '%${widget.distributor.commissionPercent}', Icons.percent),
                           ]),
                           const Divider(),
                           Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
-                            _infoCard('الرصيد المرحل', '${_prevBalance.toStringAsFixed(0)} ر.ي', Icons.arrow_forward, color: AppTheme.warningColor),
-                            _infoCard('الرصيد الحالي', '${widget.distributor.currentBalance.toStringAsFixed(0)} ر.ي', Icons.account_balance_wallet, color: AppTheme.errorColor),
+                            _infoTile('الرصيد السابق', '${_prevBalance.toStringAsFixed(0)} ر.ي', Icons.history, color: Colors.orange),
+                            _infoTile('الرصيد الحالي', '${widget.distributor.currentBalance.toStringAsFixed(0)} ر.ي', Icons.account_balance_wallet, color: Colors.red),
                           ]),
                         ],
                       ),
@@ -446,128 +541,217 @@ class _DistributorAccountScreenState extends State<DistributorAccountScreen> {
                   ),
                   const SizedBox(height: 12),
 
-                  // أزرار التحكم بالحملة
-                  Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
-                    ElevatedButton.icon(onPressed: _createNewLoad, icon: const Icon(Icons.add), label: const Text('حملة جديدة')),
-                    ElevatedButton.icon(onPressed: _saveLoad, icon: const Icon(Icons.save), label: const Text('حفظ التحميل')),
-                  ]),
-                  if (_currentLoadId != null) ...[
-                    const SizedBox(height: 8),
-                    Text('الحملة الحالية: $_currentLoadId (${_currentLoadStatus ?? ''})', style: const TextStyle(fontWeight: FontWeight.bold)),
-                  ],
-                  const SizedBox(height: 16),
-
-                  // ========== التحميل ==========
-                  const Text('🚚 التحميل', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                  ...(_products.map((p) {
-                    final total = _parsePieces(_boxesControllers[p.id], _piecesControllers[p.id], _boxSize(p.id));
-                    return Card(
-                      child: Padding(
-                        padding: const EdgeInsets.all(8),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(p.name, style: const TextStyle(fontWeight: FontWeight.bold)),
-                            Text('السلة: ${p.piecesPerBox} | السعر: ${_pricesForDistributor[p.id]?.toStringAsFixed(0)} ر.ي'),
-                            Row(
-                              children: [
-                                Expanded(child: TextField(controller: _boxesControllers[p.id], decoration: const InputDecoration(labelText: 'سلال', hintText: '0'), keyboardType: TextInputType.number, onChanged: (_) => setState(() {}))),
-                                Expanded(child: TextField(controller: _piecesControllers[p.id], decoration: InputDecoration(labelText: 'قطع', hintText: '0'), keyboardType: TextInputType.number, onChanged: (_) => setState(() {}))),
-                              ],
-                            ),
-                            Text('الكمية: ${_piecesToDisplay(total, _boxSize(p.id))} ($total قطعة)'),
-                            Text('القيمة: ${(total * (_pricesForDistributor[p.id] ?? 0)).toStringAsFixed(0)} ر.ي'),
-                          ],
+                  // أزرار التحكم بالنظام والتنقل
+                  Row(
+                    children: [
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          onPressed: _createNewLoad,
+                          icon: const Icon(Icons.add_circle),
+                          label: const Text('حملة جديدة'),
+                          style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
                         ),
                       ),
-                    );
-                  })),
-                  const SizedBox(height: 16),
-
-                  // ========== المرتجعات ==========
-                  const Text('🔄 المرتجعات', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                  ...(_products.map((p) {
-                    final returned = _parsePieces(_returnedBoxesCtrl[p.id], _returnedPiecesCtrl[p.id], _boxSize(p.id));
-                    return Card(
-                      child: Padding(
-                        padding: const EdgeInsets.all(8),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(p.name, style: const TextStyle(fontWeight: FontWeight.bold)),
-                            Row(
-                              children: [
-                                Expanded(child: TextField(controller: _returnedBoxesCtrl[p.id], decoration: const InputDecoration(labelText: 'سلال', hintText: '0'), keyboardType: TextInputType.number, onChanged: (_) => setState(() {}))),
-                                Expanded(child: TextField(controller: _returnedPiecesCtrl[p.id], decoration: InputDecoration(labelText: 'قطع', hintText: '0'), keyboardType: TextInputType.number, onChanged: (_) => setState(() {}))),
-                              ],
-                            ),
-                            Text('مرتجع: ${_piecesToDisplay(returned, _boxSize(p.id))} ($returned قطعة)'),
-                            Text('القيمة: ${(returned * (_pricesForDistributor[p.id] ?? 0)).toStringAsFixed(0)} ر.ي'),
-                          ],
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          onPressed: _saveLoad,
+                          icon: const Icon(Icons.save),
+                          label: const Text('حفظ التحميل'),
+                          style: ElevatedButton.styleFrom(backgroundColor: Colors.teal),
                         ),
                       ),
-                    );
-                  })),
-                  ElevatedButton.icon(onPressed: _saveReturns, icon: const Icon(Icons.save), label: const Text('حفظ المرتجعات')),
-                  const SizedBox(height: 16),
-
-                  // ========== التالف ==========
-                  const Text('🗑️ التالف', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                  ...(_products.map((p) {
-                    final damaged = _parsePieces(_damagedBoxesCtrl[p.id], _damagedPiecesCtrl[p.id], _boxSize(p.id));
-                    final price = double.tryParse(_damagedPriceCtrl[p.id]?.text ?? '') ?? 0;
-                    return Card(
-                      child: Padding(
-                        padding: const EdgeInsets.all(8),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(p.name, style: const TextStyle(fontWeight: FontWeight.bold)),
-                            Row(
-                              children: [
-                                Expanded(child: TextField(controller: _damagedBoxesCtrl[p.id], decoration: const InputDecoration(labelText: 'سلال', hintText: '0'), keyboardType: TextInputType.number, onChanged: (_) => setState(() {}))),
-                                Expanded(child: TextField(controller: _damagedPiecesCtrl[p.id], decoration: InputDecoration(labelText: 'قطع', hintText: '0'), keyboardType: TextInputType.number, onChanged: (_) => setState(() {}))),
-                              ],
-                            ),
-                            TextField(controller: _damagedPriceCtrl[p.id], decoration: const InputDecoration(labelText: 'سعر الوحدة', hintText: '0'), keyboardType: TextInputType.number, onChanged: (_) => setState(() {})),
-                            Text('تالف: ${_piecesToDisplay(damaged, _boxSize(p.id))} ($damaged قطعة) | القيمة: ${(damaged * price).toStringAsFixed(0)} ر.ي'),
-                          ],
-                        ),
-                      ),
-                    );
-                  })),
-                  ElevatedButton.icon(onPressed: _saveDamaged, icon: const Icon(Icons.save), label: const Text('حفظ التالف')),
-                  const SizedBox(height: 16),
-
-                  // ========== النقد والتصفية ==========
-                  const Text('💰 النقد والتصفية', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                  TextField(controller: _cashCtrl, decoration: const InputDecoration(labelText: 'النقد الموصل', hintText: '0'), keyboardType: TextInputType.number, onChanged: (_) => setState(() {})),
+                    ],
+                  ),
                   const SizedBox(height: 8),
-                  ElevatedButton.icon(onPressed: _settleLoad, icon: const Icon(Icons.check_circle), label: const Text('تصفية وإغلاق الحملة'), style: ElevatedButton.styleFrom(backgroundColor: AppTheme.successColor)),
 
-                  // ========== الحملات السابقة ==========
-                  const SizedBox(height: 24),
-                  const Text('📦 الحملات السابقة', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                  ...(_previousLoads.map((load) => Card(
-                    child: ListTile(
-                      leading: const CircleAvatar(backgroundColor: Colors.indigo, child: Icon(Icons.receipt, color: Colors.white)),
-                      title: Text('حملة ${load['load_date'] ?? ''}'),
-                      subtitle: Text('الحالة: ${load['status'] ?? 'مغلقة'}'),
-                      onTap: () => _showLoadDetails(load['id'] as String),
+                  if (_currentLoadId != null)
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(8)),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text('الحملة المفتوحة: ${_currentLoadId!.substring(0, 8)}...', style: const TextStyle(fontWeight: FontWeight.bold)),
+                          Text('التاريخ: ${_currentLoadDate ?? ''}'),
+                          Text('الحالة: ${_currentLoadStatus ?? ''}', style: TextStyle(color: _currentLoadStatus == 'مغلقة' ? Colors.red : Colors.green, fontWeight: FontWeight.bold)),
+                        ],
+                      ),
                     ),
-                  ))),
+                  const SizedBox(height: 16),
+
+                  // قسم التحميل
+                  const Text('🚚 التحميل للحملة الحالية', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
+                  ..._products.map((p) {
+                    final totalQty = _parsePieces(_boxesControllers[p.id], _piecesControllers[p.id], p.piecesPerBox);
+                    final price = _pricesForDistributor[p.id] ?? 0;
+                    return Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(8),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(p.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                            Text('سعر الوحدة: ${price.toStringAsFixed(0)} | سلة: ${p.piecesPerBox} قطعة', style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                            Row(
+                              children: [
+                                Expanded(child: TextField(controller: _boxesControllers[p.id], decoration: const InputDecoration(labelText: 'سلال'), keyboardType: TextInputType.number, onChanged: (_) => setState(_calculateTotals))),
+                                const SizedBox(width: 8),
+                                Expanded(child: TextField(controller: _piecesControllers[p.id], decoration: const InputDecoration(labelText: 'قطع'), keyboardType: TextInputType.number, onChanged: (_) => setState(_calculateTotals))),
+                              ],
+                            ),
+                            Text('الإجمالي: ${_piecesToDisplay(totalQty, p.piecesPerBox)} (${totalQty * price} ر.ي)', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                          ],
+                        ),
+                      ),
+                    );
+                  }),
+                  const SizedBox(height: 16),
+
+                  // قسم المرتجعات المستقل
+                  Card(
+                    color: Colors.orange.shade50,
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Text('🔄 مرتجع هذه الحملة فقط', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.deepOrange)),
+                              Text('إجمالي المرجوع: ${_returnedTotalValue.toStringAsFixed(0)} ر.ي', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.deepOrange)),
+                            ],
+                          ),
+                          const Divider(),
+                          ..._products.map((p) {
+                            final retQty = _parsePieces(_returnedBoxesCtrl[p.id], _returnedPiecesCtrl[p.id], p.piecesPerBox);
+                            final price = _pricesForDistributor[p.id] ?? 0;
+                            return Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 4),
+                              child: Row(
+                                children: [
+                                  Expanded(flex: 2, child: Text(p.name, style: const TextStyle(fontSize: 13))),
+                                  Expanded(child: TextField(controller: _returnedBoxesCtrl[p.id], decoration: const InputDecoration(labelText: 'سلة مرتجع'), keyboardType: TextInputType.number, onChanged: (_) => setState(_calculateTotals))),
+                                  const SizedBox(width: 4),
+                                  Expanded(child: TextField(controller: _returnedPiecesCtrl[p.id], decoration: const InputDecoration(labelText: 'قطع مرتجع'), keyboardType: TextInputType.number, onChanged: (_) => setState(_calculateTotals))),
+                                  const SizedBox(width: 4),
+                                  Expanded(child: Text('${retQty * price} ر.ي', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold))),
+                                ],
+                              ),
+                            );
+                          }),
+                          const SizedBox(height: 8),
+                          ElevatedButton.icon(onPressed: _saveReturns, icon: const Icon(Icons.save), label: const Text('حفظ المرتجعات وتحديث المخزن')),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // قسم التالف المستقل مع التسعير
+                  Card(
+                    color: Colors.red.shade50,
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Text('🗑️ تالف هذه الحملة فقط', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.red)),
+                              Text('إجمالي التالف: ${_damagedTotalValue.toStringAsFixed(0)} ر.ي', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
+                            ],
+                          ),
+                          const Divider(),
+                          ..._products.map((p) {
+                            final damPieces = _parsePieces(_damagedBoxesCtrl[p.id], _damagedPiecesCtrl[p.id], p.piecesPerBox);
+                            final price = double.tryParse(_damagedPriceCtrl[p.id]?.text ?? '') ?? 0;
+                            return Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 4),
+                              child: Row(
+                                children: [
+                                  Expanded(flex: 2, child: Text(p.name, style: const TextStyle(fontSize: 13))),
+                                  Expanded(child: TextField(controller: _damagedBoxesCtrl[p.id], decoration: const InputDecoration(labelText: 'سلة تالف'), keyboardType: TextInputType.number, onChanged: (_) => setState(_calculateTotals))),
+                                  const SizedBox(width: 4),
+                                  Expanded(child: TextField(controller: _damagedPiecesCtrl[p.id], decoration: const InputDecoration(labelText: 'قطع تالف'), keyboardType: TextInputType.number, onChanged: (_) => setState(_calculateTotals))),
+                                  const SizedBox(width: 4),
+                                  Expanded(child: TextField(controller: _damagedPriceCtrl[p.id], decoration: const InputDecoration(labelText: 'سعر القطعة'), keyboardType: TextInputType.number, onChanged: (_) => setState(_calculateTotals))),
+                                  const SizedBox(width: 4),
+                                  Expanded(child: Text('${damPieces * price} ر.ي', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold))),
+                                ],
+                              ),
+                            );
+                          }),
+                          const SizedBox(height: 8),
+                          ElevatedButton.icon(onPressed: _saveDamaged, icon: const Icon(Icons.save), label: const Text('حفظ التالف والتسعير'), style: ElevatedButton.styleFrom(backgroundColor: Colors.red)),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // النقد والتصفية
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('💰 النقد والتصفية النهائية', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                          const SizedBox(height: 8),
+                          TextField(controller: _cashCtrl, decoration: const InputDecoration(labelText: 'النقد المسلم من الموزع'), keyboardType: TextInputType.number),
+                          const SizedBox(height: 8),
+                          ElevatedButton.icon(
+                            onPressed: _settleLoad,
+                            icon: const Icon(Icons.check_circle),
+                            label: const Text('إغلاق وتصفية الحملة'),
+                            style: ElevatedButton.styleFrom(backgroundColor: Colors.green, minimumSize: const Size.fromHeight(45)),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  // تصفح أرشيف الحملات السابقة
+                  const SizedBox(height: 24),
+                  const Text('📦 أرشيف الحملات السابقة', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
+                  ListView.builder(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    itemCount: _previousLoads.length,
+                    itemBuilder: (context, index) {
+                      final load = _previousLoads[index];
+                      final isSelected = load['id'] == _currentLoadId;
+                      return Card(
+                        color: isSelected ? Colors.blue.shade100 : Colors.white,
+                        child: ListTile(
+                          leading: Icon(Icons.inventory, color: isSelected ? Colors.blue : Colors.grey),
+                          title: Text('حملة بتاريخ: ${load['load_date'] ?? ''}'),
+                          subtitle: Text('رقم الحملة: ${(load['id'] as String).substring(0, 8)} | الحالة: ${load['status'] ?? ''}'),
+                          trailing: ElevatedButton(
+                            onPressed: () => _loadLoadDetails(load['id'] as String),
+                            child: const Text('عرض وتعديل'),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
                 ],
               ),
             ),
     );
   }
 
-  Widget _infoCard(String label, String value, IconData icon, {Color color = AppTheme.primaryColor}) {
+  Widget _infoTile(String label, String value, IconData icon, {Color color = Colors.indigo}) {
     return Column(
       children: [
         Icon(icon, color: color, size: 20),
         const SizedBox(height: 4),
-        Text(label, style: const TextStyle(fontSize: 10, color: AppTheme.textSecondaryColor)),
+        Text(label, style: const TextStyle(fontSize: 10, color: Colors.grey)),
         Text(value, style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: color)),
       ],
     );
