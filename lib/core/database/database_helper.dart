@@ -581,6 +581,7 @@ class DatabaseHelper {
       CREATE TABLE IF NOT EXISTS showroom_daily_expenses (
         id TEXT PRIMARY KEY,
         business_date TEXT NOT NULL,
+        category TEXT DEFAULT 'expense',
         amount REAL NOT NULL,
         details TEXT,
         created_at TEXT NOT NULL,
@@ -1039,6 +1040,11 @@ class DatabaseHelper {
           created_at TEXT NOT NULL
         )
       ''');
+    }
+    if (oldVersion < 7) {
+      await db.execute(
+        'ALTER TABLE showroom_daily_expenses ADD COLUMN category TEXT DEFAULT "expense"'
+      );
     }
   }
 
