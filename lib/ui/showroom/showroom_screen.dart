@@ -21,13 +21,16 @@ class _ShowroomScreenState extends State<ShowroomScreen>
   final ShowroomRepository _showroomRepo = ShowroomRepository();
   final Uuid _uuid = const Uuid();
 
+  // بيانات ثابتة (تحمّل مرة واحدة)
+  List<Product> _allProducts = [];
   List<Product> _products = [];
   List<Worker> _workers = [];
+  bool _staticDataLoaded = false;
 
   String _businessDate = DateTime.now().toIso8601String().substring(0, 10);
   final TextEditingController _dateController = TextEditingController();
 
-  // السحبيات والمرتجعات
+  // متحكمات السحبيات والمرتجعات – تُنشأ مرة واحدة وتُعاد تعبئتها
   final Map<String, TextEditingController> _loadBoxesCtrl = {};
   final Map<String, TextEditingController> _loadPiecesCtrl = {};
   final Map<String, TextEditingController> _returnBoxesCtrl = {};
@@ -58,29 +61,27 @@ class _ShowroomScreenState extends State<ShowroomScreen>
   late TabController _tabController;
 
   // قيم اليوم السابق
-  double _prevRemainingValue = 0.0;   // قيمة مدور البضاعة
-  double _prevResultAmount = 0.0;     // العجز/الزيادة المالية من اليوم السابق
+  double _prevRemainingValue = 0.0;
+  double _prevResultAmount = 0.0;
 
   // حالة الإغلاق والصلاحية
   bool _isDayClosed = false;
-  bool _isAdmin = false; // يجب ربطه بنظام الجلسات
+  bool _isAdmin = false;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 5, vsync: this);
     _dateController.text = _businessDate;
-    _loadAllData();
+    _loadStaticDataAndThenDailyData();
   }
 
   @override
   void dispose() {
     _tabController.dispose();
     _dateController.dispose();
-    for (var c in _loadBoxesCtrl.values) { c.dispose(); }
-    for (var c in _loadPiecesCtrl.values) { c.dispose(); }
-    for (var c in _returnBoxesCtrl.values) { c.dispose(); }
-    for (var c in _returnPiecesCtrl.values) { c.dispose(); }
+    // تنظيف جميع المتحكمات
+    _disposeAllProductControllers();
     for (var c in _advanceCtrl.values) { c.dispose(); }
     _clearExpenseControllers();
     _clearSmallLedgerControllers();
@@ -88,6 +89,17 @@ class _ShowroomScreenState extends State<ShowroomScreen>
     _showroomExpenseCtrl.dispose();
     _cashReceivedCtrl.dispose();
     super.dispose();
+  }
+
+  void _disposeAllProductControllers() {
+    for (var c in _loadBoxesCtrl.values) { c.dispose(); }
+    for (var c in _loadPiecesCtrl.values) { c.dispose(); }
+    for (var c in _returnBoxesCtrl.values) { c.dispose(); }
+    for (var c in _returnPiecesCtrl.values) { c.dispose(); }
+    _loadBoxesCtrl.clear();
+    _loadPiecesCtrl.clear();
+    _returnBoxesCtrl.clear();
+    _returnPiecesCtrl.clear();
   }
 
   void _clearExpenseControllers() {
@@ -111,32 +123,44 @@ class _ShowroomScreenState extends State<ShowroomScreen>
     }
   }
 
-  /// الحصول على صلاحية المستخدم الحالي (يُستبدل لاحقاً بنظام الجلسات)
   Future<String> _getCurrentUserRole() async {
-    // TODO: استبدل هذا بجلب حقيقي من SessionManager أو AuthService
-    return 'role_admin'; // حالياً يُعطي صلاحية مدير للتجربة
+    // TODO: ربط حقيقي بالجلسة
+    return 'role_admin';
   }
 
+  /// تحميل المنتجات والعمال لمرة واحدة
+  Future<void> _loadStaticData() async {
+    if (_staticDataLoaded) return;
+    final products = await _productRepo.getAll();
+    _allProducts = products;
+    _products = products.where((p) => p.active).toList();
+    _workers = await _workerRepo.getAll();
+    _staticDataLoaded = true;
+  }
+
+  /// تحميل البيانات الكاملة (الثابتة + المتغيرة بالتاريخ)
   Future<void> _loadAllData() async {
+    // تأكد من تحميل البيانات الثابتة أولاً
+    await _loadStaticData();
+    await _loadDailyData();
+  }
+
+  /// تحميل البيانات المتغيرة بالتاريخ فقط (تستخدم عند تغيير اليوم)
+  Future<void> _loadDailyData() async {
+    if (!mounted) return;
     setState(() => _isLoading = true);
     try {
-      // المنتجات
-      final products = await _productRepo.getAll();
-      _products = products.where((p) => p.active).toList();
-      
+      // إعادة بناء متحكمات المنتجات إذا تغيرت القائمة (نادر)
+      _rebuildProductControllersIfNeeded();
+
+      // مدور الأمس لكل منتج
       _yesterdayRemaining.clear();
       for (var p in _products) {
-        _loadBoxesCtrl[p.id] ??= TextEditingController(text: '0');
-        _loadPiecesCtrl[p.id] ??= TextEditingController(text: '0');
-        _returnBoxesCtrl[p.id] ??= TextEditingController(text: '0');
-        _returnPiecesCtrl[p.id] ??= TextEditingController(text: '0');
-
-        // تحميل مدور أمس
         final remaining = await _showroomRepo.getYesterdayRemaining(_businessDate, p.id);
         _yesterdayRemaining[p.id] = remaining;
       }
 
-      // تحميل الإدخالات السابقة
+      // تعبئة قيم اليوم الحالي
       for (var p in _products) {
         final entry = await _showroomRepo.getEntry(_businessDate, p.id);
         if (entry != null) {
@@ -144,17 +168,21 @@ class _ShowroomScreenState extends State<ShowroomScreen>
           _loadPiecesCtrl[p.id]?.text = entry.loadPieces.toString();
           _returnBoxesCtrl[p.id]?.text = entry.returnBoxes.toString();
           _returnPiecesCtrl[p.id]?.text = entry.returnPieces.toString();
+        } else {
+          _loadBoxesCtrl[p.id]?.text = '0';
+          _loadPiecesCtrl[p.id]?.text = '0';
+          _returnBoxesCtrl[p.id]?.text = '0';
+          _returnPiecesCtrl[p.id]?.text = '0';
         }
       }
 
-      // العمال
-      _workers = await _workerRepo.getAll();
+      // العمال: إعادة تعبئة البرانيات إلى الصفر
       for (var w in _workers) {
-        _advanceCtrl[w.id] ??= TextEditingController(text: '0');
+        _advanceCtrl[w.id]?.text = '0';
       }
       _workerReceived = await _showroomRepo.getWorkerAttendance(_businessDate);
 
-      // البيانات المالية من اليوم السابق
+      // اليوم السابق
       final prevDay = DateTime.parse(_businessDate)
           .subtract(const Duration(days: 1))
           .toIso8601String()
@@ -168,16 +196,10 @@ class _ShowroomScreenState extends State<ShowroomScreen>
         _prevResultAmount = 0.0;
       }
 
-      // تحميل الخرج اليومي
       await _loadExpenses();
-
-      // تحميل الكشف الصغير
       await _loadSmallLedger();
-
-      // تحميل القات
       await _loadKhat();
 
-      // تحميل كشف الحساب الرسمي إن وجد
       final currentAccount = await _showroomRepo.getDailyAccount(_businessDate);
       if (currentAccount != null) {
         _showroomExpenseCtrl.text = (currentAccount['showroom_expense'] ?? 0).toString();
@@ -189,14 +211,44 @@ class _ShowroomScreenState extends State<ShowroomScreen>
         _cashConfirmed = false;
       }
 
-      // حالة الإغلاق والصلاحية
       _isDayClosed = await _showroomRepo.isDayClosed(_businessDate);
       final role = await _getCurrentUserRole();
       _isAdmin = (role == 'role_admin');
     } catch (e) {
-      debugPrint('Error loading showroom: $e');
+      debugPrint('Error loading daily data: $e');
     }
-    setState(() => _isLoading = false);
+    if (mounted) {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  /// تحميل أولي يجمع الثابت والمتغير
+  Future<void> _loadStaticDataAndThenDailyData() async {
+    await _loadStaticData();
+    // إنشاء المتحكمات مرة واحدة
+    _buildProductControllers();
+    await _loadDailyData();
+  }
+
+  /// إنشاء متحكمات المنتجات (تُستدعى مرة واحدة)
+  void _buildProductControllers() {
+    for (var p in _products) {
+      _loadBoxesCtrl[p.id] ??= TextEditingController(text: '0');
+      _loadPiecesCtrl[p.id] ??= TextEditingController(text: '0');
+      _returnBoxesCtrl[p.id] ??= TextEditingController(text: '0');
+      _returnPiecesCtrl[p.id] ??= TextEditingController(text: '0');
+    }
+  }
+
+  /// إعادة بناء المتحكمات إذا تغيرت قائمة المنتجات (للأمان)
+  void _rebuildProductControllersIfNeeded() {
+    // لو حصل تغيير نادر في المنتجات النشطة، نضمن وجود متحكم للجميع
+    for (var p in _products) {
+      _loadBoxesCtrl[p.id] ??= TextEditingController(text: '0');
+      _loadPiecesCtrl[p.id] ??= TextEditingController(text: '0');
+      _returnBoxesCtrl[p.id] ??= TextEditingController(text: '0');
+      _returnPiecesCtrl[p.id] ??= TextEditingController(text: '0');
+    }
   }
 
   Future<void> _loadExpenses() async {
@@ -334,34 +386,31 @@ class _ShowroomScreenState extends State<ShowroomScreen>
       }
     }
     if (errors.isNotEmpty) {
-      showDialog(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('تجاوز المخزون'),
-          content: Text('الكميات التالية أكبر من المخزون:\n${errors.join('\n')}'),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('حسناً')),
-          ],
-        ),
-      );
+      _showErrorDialog('تجاوز المخزون', 'الكميات التالية أكبر من المخزون:\n${errors.join('\n')}');
       return;
     }
 
+    // استخدام saveAllEntries لحفظ جميع المنتجات في معاملة واحدة
+    final List<Map<String, dynamic>> entries = [];
+    for (var p in _products) {
+      entries.add({
+        'productId': p.id,
+        'loadBoxes': int.tryParse(_loadBoxesCtrl[p.id]?.text ?? '0') ?? 0,
+        'loadPieces': int.tryParse(_loadPiecesCtrl[p.id]?.text ?? '0') ?? 0,
+        'returnBoxes': int.tryParse(_returnBoxesCtrl[p.id]?.text ?? '0') ?? 0,
+        'returnPieces': int.tryParse(_returnPiecesCtrl[p.id]?.text ?? '0') ?? 0,
+        'boxSize': _getBoxSize(p.id),
+        'retailPrice': _getRetailPrice(p.id),
+      });
+    }
+
     try {
-      for (var p in _products) {
-        await _showroomRepo.saveEntry(
-          businessDate: _businessDate,
-          productId: p.id,
-          loadBoxes: int.tryParse(_loadBoxesCtrl[p.id]?.text ?? '0') ?? 0,
-          loadPieces: int.tryParse(_loadPiecesCtrl[p.id]?.text ?? '0') ?? 0,
-          returnBoxes: int.tryParse(_returnBoxesCtrl[p.id]?.text ?? '0') ?? 0,
-          returnPieces: int.tryParse(_returnPiecesCtrl[p.id]?.text ?? '0') ?? 0,
-          boxSize: _getBoxSize(p.id),
-          retailPrice: _getRetailPrice(p.id),
-          createdBy: 'admin',
-          deviceId: 'mobile',
-        );
-      }
+      await _showroomRepo.saveAllEntries(
+        businessDate: _businessDate,
+        entries: entries,
+        createdBy: 'admin',
+        deviceId: 'mobile',
+      );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('تم حفظ حركات السحب والمرتجعات'),
@@ -375,6 +424,19 @@ class _ShowroomScreenState extends State<ShowroomScreen>
         );
       }
     }
+  }
+
+  void _showErrorDialog(String title, String message) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title),
+        content: Text(message),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('حسناً')),
+        ],
+      ),
+    );
   }
 
   Future<void> _saveTab2() async {
@@ -422,7 +484,7 @@ class _ShowroomScreenState extends State<ShowroomScreen>
   Future<void> _saveExpenses() async {
     if (!_editable) return;
     try {
-      final List<Map<String, dynamic>> list = _expenseRows.map((row) => {
+      final list = _expenseRows.map((row) => {
         'id': row.id,
         'amount': double.tryParse(row.amountCtrl.text) ?? 0,
         'details': row.detailsCtrl.text,
@@ -450,7 +512,7 @@ class _ShowroomScreenState extends State<ShowroomScreen>
   Future<void> _saveSmallLedger() async {
     if (!_editable) return;
     try {
-      final List<Map<String, dynamic>> list = _smallLedgerRows.map((row) => {
+      final list = _smallLedgerRows.map((row) => {
         'id': row.id,
         'amount': double.tryParse(row.amountCtrl.text) ?? 0,
         'details': row.detailsCtrl.text,
@@ -478,7 +540,7 @@ class _ShowroomScreenState extends State<ShowroomScreen>
   Future<void> _saveKhat() async {
     if (!_editable) return;
     try {
-      final List<Map<String, dynamic>> list = _khatRows.map((row) => {
+      final list = _khatRows.map((row) => {
         'id': row.id,
         'worker_name': row.workerNameCtrl.text,
         'amount': double.tryParse(row.amountCtrl.text) ?? 0,
@@ -651,7 +713,7 @@ class _ShowroomScreenState extends State<ShowroomScreen>
               final d = DateTime.parse(_businessDate).subtract(const Duration(days: 1));
               _businessDate = d.toIso8601String().substring(0, 10);
               _dateController.text = _businessDate;
-              _loadAllData();
+              _loadDailyData();
             },
           ),
           Expanded(
@@ -662,7 +724,7 @@ class _ShowroomScreenState extends State<ShowroomScreen>
               onSubmitted: (v) {
                 if (v.trim().isNotEmpty) {
                   _businessDate = v.trim();
-                  _loadAllData();
+                  _loadDailyData();
                 }
               },
             ),
@@ -673,7 +735,7 @@ class _ShowroomScreenState extends State<ShowroomScreen>
               final d = DateTime.parse(_businessDate).add(const Duration(days: 1));
               _businessDate = d.toIso8601String().substring(0, 10);
               _dateController.text = _businessDate;
-              _loadAllData();
+              _loadDailyData();
             },
           ),
         ],
