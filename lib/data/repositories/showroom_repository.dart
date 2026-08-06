@@ -20,14 +20,24 @@ class ShowroomRepository {
     return ShowroomDailyEntry.fromMap(maps.first);
   }
 
-  // جلب مدور الأمس لمنتج معين
+  /// جلب مدور آخر يوم سابق للتاريخ المطلوب (يتحمل الفجوات)
+  Future<int> getLastRemainingBeforeDate(String businessDate, String productId) async {
+    final db = await _dbHelper.database;
+    final result = await db.query(
+      DBConstants.tableShowroomDailyEntries,
+      columns: ['remaining_total_pieces'],
+      where: 'business_date < ? AND product_id = ?',
+      whereArgs: [businessDate, productId],
+      orderBy: 'business_date DESC',
+      limit: 1,
+    );
+    if (result.isEmpty) return 0;
+    return result.first['remaining_total_pieces'] as int? ?? 0;
+  }
+
+  // جلب مدور الأمس لمنتج معين (تستعمل في الشاشة لعرض أولي، اختيارية)
   Future<int> getYesterdayRemaining(String todayDate, String productId) async {
-    final yesterday = DateTime.parse(todayDate)
-        .subtract(const Duration(days: 1))
-        .toIso8601String()
-        .substring(0, 10);
-    final entry = await getEntry(yesterday, productId);
-    return entry?.remainingTotalPieces ?? 0;
+    return await getLastRemainingBeforeDate(todayDate, productId);
   }
 
   Future<List<ShowroomDailyEntry>> getDailyEntries(String businessDate) async {
@@ -52,6 +62,11 @@ class ShowroomRepository {
     String? createdBy,
     String? deviceId,
   }) async {
+    // منع التعديل بعد الإغلاق
+    if (await isDayClosed(businessDate)) {
+      throw Exception('لا يمكن التعديل على يومية مغلقة');
+    }
+
     final db = await _dbHelper.database;
     final now = DatabaseHelper.now;
     final existing = await getEntry(businessDate, productId);
@@ -62,22 +77,8 @@ class ShowroomRepository {
     final returnValue = returnTotalPieces * retailPrice;
     final netValue = loadValue - returnValue;
 
-    // المدور عليه = (مدور أمس) + سحب اليوم - مرتجع اليوم
-    int previousRemaining = 0;
-    if (existing != null) {
-      previousRemaining = existing.remainingTotalPieces;
-    } else {
-      // جلب مدور أمس من جدول الإدخالات
-      final yesterday = DateTime.parse(businessDate)
-          .subtract(const Duration(days: 1))
-          .toIso8601String()
-          .substring(0, 10);
-      final yesterdayEntry = await getEntry(yesterday, productId);
-      if (yesterdayEntry != null) {
-        previousRemaining = yesterdayEntry.remainingTotalPieces;
-      }
-    }
-
+    // المدور عليه = (مدور آخر يوم سابق) + سحب اليوم - مرتجع اليوم
+    final previousRemaining = await getLastRemainingBeforeDate(businessDate, productId);
     final remainingTotalPieces = previousRemaining + loadTotalPieces - returnTotalPieces;
     final remainingBoxes = remainingTotalPieces ~/ boxSize;
     final remainingPieces = remainingTotalPieces % boxSize;
@@ -279,12 +280,16 @@ class ShowroomRepository {
 
   Future<List<Map<String, dynamic>>> getWorkerAdvances(String date) async {
     final db = await _dbHelper.database;
-    // يمكن الاستعلام من worker_accounts إذا احتجنا، لكن الصفحة الحالية تستخدم المدخلات مباشرة
     return [];
   }
 
   // ========== ٣. الخرج اليومي ==========
-  // جلب الخرج اليومي (مع إمكانية تصفية حسب الفئة)
+  Future<bool> isDayClosed(String businessDate) async {
+    final account = await getDailyAccount(businessDate);
+    if (account == null) return false;
+    return (account['closed'] as int? ?? 0) == 1;
+  }
+
   Future<List<Map<String, dynamic>>> getDailyExpenses(String businessDate, {String category = 'expense'}) async {
     final db = await _dbHelper.database;
     return await db.query(
@@ -294,7 +299,6 @@ class ShowroomRepository {
     );
   }
 
-  // حفظ الخرج اليومي (مع تحديد الفئة)
   Future<void> saveDailyExpenses({
     required String businessDate,
     required List<Map<String, dynamic>> expenses,
@@ -302,10 +306,13 @@ class ShowroomRepository {
     String? createdBy,
     String? deviceId,
   }) async {
+    if (await isDayClosed(businessDate)) {
+      throw Exception('لا يمكن التعديل على يومية مغلقة');
+    }
+
     final db = await _dbHelper.database;
     final now = DatabaseHelper.now;
     await db.transaction((txn) async {
-      // حذف القديم لنفس اليوم ونفس الفئة
       await txn.delete(
         DBConstants.tableShowroomDailyExpenses,
         where: 'business_date = ? AND category = ?',
@@ -330,7 +337,6 @@ class ShowroomRepository {
     });
   }
 
-  // دوال خاصة بالكشف الصغير
   Future<List<Map<String, dynamic>>> getSmallLedger(String businessDate) async {
     return await getDailyExpenses(businessDate, category: 'small_ledger');
   }
@@ -341,6 +347,9 @@ class ShowroomRepository {
     String? createdBy,
     String? deviceId,
   }) async {
+    if (await isDayClosed(businessDate)) {
+      throw Exception('لا يمكن التعديل على يومية مغلقة');
+    }
     await saveDailyExpenses(
       businessDate: businessDate,
       expenses: entries,
@@ -415,7 +424,6 @@ class ShowroomRepository {
       await db.insert(DBConstants.tableShowroomDailyAccount, data);
     }
 
-    // Audit log
     await db.insert(DBConstants.tableAuditLogs, {
       'id': _uuid.v4(),
       'user_id': createdBy,
@@ -437,6 +445,10 @@ class ShowroomRepository {
     return results.isNotEmpty ? results.first : null;
   }
 
+  Future<Map<String, dynamic>?> getPreviousDayFull(String currentDate) async {
+    return await getPreviousDayAccount(currentDate);
+  }
+
   // ========== ٥. قات العمال ==========
   Future<List<Map<String, dynamic>>> getKhatEntries(String businessDate) async {
     final db = await _dbHelper.database;
@@ -450,6 +462,10 @@ class ShowroomRepository {
     String? createdBy,
     String? deviceId,
   }) async {
+    if (await isDayClosed(businessDate)) {
+      throw Exception('لا يمكن التعديل على يومية مغلقة');
+    }
+
     final db = await _dbHelper.database;
     final now = DatabaseHelper.now;
     await db.transaction((txn) async {
@@ -470,6 +486,45 @@ class ShowroomRepository {
           });
         }
       }
+    });
+  }
+
+  // ========== دوال تكميلية ==========
+
+  Future<int> getAvailableStock(String productId) async {
+    final db = await _dbHelper.database;
+    final rows = await db.query(
+      DBConstants.tableStock,
+      columns: ['quantity_pieces', 'reserved_quantity'],
+      where: 'product_id = ?',
+      whereArgs: [productId],
+    );
+    if (rows.isEmpty) return 0;
+    final qty = rows.first['quantity_pieces'] as int? ?? 0;
+    final reserved = rows.first['reserved_quantity'] as int? ?? 0;
+    return qty - reserved;
+  }
+
+  Future<void> recordWorkerDailyExpense({
+    required String workerId,
+    required String date,
+    required double amount,
+    String? createdBy,
+    String? deviceId,
+  }) async {
+    final db = await _dbHelper.database;
+    final now = DatabaseHelper.now;
+    await db.insert(DBConstants.tableWorkerAccounts, {
+      'id': _uuid.v4(),
+      'worker_id': workerId,
+      'transaction_type': 'مصروف يومي',
+      'amount': amount,
+      'description': 'مصروف يومي عن $date (حضور المعرض)',
+      'transaction_date': date,
+      'created_at': now,
+      'created_by': createdBy,
+      'device_id': deviceId,
+      'sync_status': 'Pending',
     });
   }
 }
