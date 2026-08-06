@@ -8,7 +8,24 @@ class ShowroomRepository {
   final DatabaseHelper _dbHelper = DatabaseHelper();
   final Uuid _uuid = const Uuid();
 
+  // ========== دوال مساعدة ==========
+
+  /// التحقق من حالة إغلاق اليومية
+  Future<bool> isDayClosed(String businessDate) async {
+    final account = await getDailyAccount(businessDate);
+    if (account == null) return false;
+    return (account['closed'] as int? ?? 0) == 1;
+  }
+
+  /// التحقق من إغلاق اليومية ورمي استثناء إذا كانت مغلقة
+  Future<void> _ensureDayOpen(String businessDate) async {
+    if (await isDayClosed(businessDate)) {
+      throw Exception('لا يمكن التعديل على يومية مغلقة');
+    }
+  }
+
   // ========== ١. إدخالات الحركة اليومية ==========
+
   Future<ShowroomDailyEntry?> getEntry(String date, String productId) async {
     final db = await _dbHelper.database;
     final maps = await db.query(
@@ -20,36 +37,27 @@ class ShowroomRepository {
     return ShowroomDailyEntry.fromMap(maps.first);
   }
 
-  /// جلب مدور آخر يوم سابق للتاريخ المطلوب (يتحمل الفجوات)
+  /// جلب مدور آخر يوم سابق للتاريخ المطلوب باستعلام واحد محسن (JOIN)
   Future<int> getLastRemainingBeforeDate(String businessDate, String productId) async {
     final db = await _dbHelper.database;
-    // نجلب الإدخال السابق
-    final result = await db.query(
-      DBConstants.tableShowroomDailyEntries,
-      columns: ['remaining_boxes', 'remaining_pieces', 'product_id'],
-      where: 'business_date < ? AND product_id = ?',
-      whereArgs: [businessDate, productId],
-      orderBy: 'business_date DESC',
-      limit: 1,
-    );
+    final result = await db.rawQuery('''
+      SELECT e.remaining_boxes, e.remaining_pieces, COALESCE(p.pieces_per_box, 60) as box_size
+      FROM ${DBConstants.tableShowroomDailyEntries} e
+      LEFT JOIN ${DBConstants.tableProducts} p ON e.product_id = p.id
+      WHERE e.business_date < ? AND e.product_id = ?
+      ORDER BY e.business_date DESC
+      LIMIT 1
+    ''', [businessDate, productId]);
+
     if (result.isEmpty) return 0;
     
     final remainingBoxes = result.first['remaining_boxes'] as int? ?? 0;
     final remainingPieces = result.first['remaining_pieces'] as int? ?? 0;
-    
-    // نحتاج pieces_per_box من المنتج
-    final product = await db.query(
-      DBConstants.tableProducts,
-      columns: ['pieces_per_box'],
-      where: 'id = ?',
-      whereArgs: [productId],
-    );
-    final boxSize = product.isNotEmpty ? (product.first['pieces_per_box'] as int? ?? 60) : 60;
+    final boxSize = result.first['box_size'] as int? ?? 60;
     
     return (remainingBoxes * boxSize) + remainingPieces;
   }
 
-  // جلب مدور الأمس لمنتج معين
   Future<int> getYesterdayRemaining(String todayDate, String productId) async {
     return await getLastRemainingBeforeDate(todayDate, productId);
   }
@@ -64,6 +72,131 @@ class ShowroomRepository {
     return maps.map((m) => ShowroomDailyEntry.fromMap(m)).toList();
   }
 
+  /// حفظ جميع إدخالات اليوم في Transaction واحدة
+  Future<void> saveAllEntries({
+    required String businessDate,
+    required List<Map<String, dynamic>> entries,
+    String? createdBy,
+    String? deviceId,
+  }) async {
+    if (entries.isEmpty) return;
+    await _ensureDayOpen(businessDate);
+
+    final db = await _dbHelper.database;
+    final now = DatabaseHelper.now;
+
+    await db.transaction((txn) async {
+      for (var entry in entries) {
+        final productId = entry['productId'] as String;
+        final loadBoxes = entry['loadBoxes'] as int;
+        final loadPieces = entry['loadPieces'] as int;
+        final returnBoxes = entry['returnBoxes'] as int;
+        final returnPieces = entry['returnPieces'] as int;
+        final boxSize = entry['boxSize'] as int;
+        final retailPrice = entry['retailPrice'] as double;
+
+        // جلب القديم لحساب الفروقات
+        final existingMaps = await txn.query(
+          DBConstants.tableShowroomDailyEntries,
+          where: 'business_date = ? AND product_id = ?',
+          whereArgs: [businessDate, productId],
+        );
+        final existing = existingMaps.isNotEmpty ? ShowroomDailyEntry.fromMap(existingMaps.first) : null;
+
+        final loadTotalPieces = (loadBoxes * boxSize) + loadPieces;
+        final returnTotalPieces = (returnBoxes * boxSize) + returnPieces;
+
+        final oldLoad = existing?.loadTotalPieces ?? 0;
+        final oldReturn = existing?.returnTotalPieces ?? 0;
+        final netLoadDiff = loadTotalPieces - oldLoad;
+        final netReturnDiff = returnTotalPieces - oldReturn;
+
+        // تحديث المخزون بالفروقات فقط
+        if (netLoadDiff != 0) {
+          if (netLoadDiff > 0) {
+            await _deductFromProductionStock(txn, productId, netLoadDiff, businessDate, createdBy, deviceId);
+          } else {
+            await _addToProductionStock(txn, productId, -netLoadDiff, businessDate, createdBy, deviceId);
+          }
+        }
+        if (netReturnDiff != 0) {
+          if (netReturnDiff > 0) {
+            await _addToProductionStock(txn, productId, netReturnDiff, businessDate, createdBy, deviceId);
+          } else {
+            await _deductFromProductionStock(txn, productId, -netReturnDiff, businessDate, createdBy, deviceId);
+          }
+        }
+
+        final loadValue = loadTotalPieces * retailPrice;
+        final returnValue = returnTotalPieces * retailPrice;
+        final netValue = loadValue - returnValue;
+
+        // حساب مدور الأمس داخل المعاملة
+        final previousMaps = await txn.query(
+          DBConstants.tableShowroomDailyEntries,
+          columns: ['remaining_boxes', 'remaining_pieces'],
+          where: 'business_date < ? AND product_id = ?',
+          whereArgs: [businessDate, productId],
+          orderBy: 'business_date DESC',
+          limit: 1,
+        );
+        int previousRemaining = 0;
+        if (previousMaps.isNotEmpty) {
+          final remBoxes = previousMaps.first['remaining_boxes'] as int? ?? 0;
+          final remPieces = previousMaps.first['remaining_pieces'] as int? ?? 0;
+          previousRemaining = (remBoxes * boxSize) + remPieces;
+        }
+
+        final remainingTotalPieces = previousRemaining + loadTotalPieces - returnTotalPieces;
+        final remainingBoxes = remainingTotalPieces ~/ boxSize;
+        final remainingPieces = remainingTotalPieces % boxSize;
+        final remainingValue = remainingTotalPieces * retailPrice;
+
+        final entryData = {
+          'business_date': businessDate,
+          'product_id': productId,
+          'load_boxes': loadBoxes,
+          'load_pieces': loadPieces,
+          'load_total_pieces': loadTotalPieces,
+          'return_boxes': returnBoxes,
+          'return_pieces': returnPieces,
+          'return_total_pieces': returnTotalPieces,
+          'load_value': loadValue,
+          'return_value': returnValue,
+          'net_value': netValue,
+          'remaining_boxes': remainingBoxes,
+          'remaining_pieces': remainingPieces,
+          'remaining_value': remainingValue,
+          'updated_at': now,
+        };
+
+        if (existing != null) {
+          await txn.update(
+            DBConstants.tableShowroomDailyEntries,
+            entryData,
+            where: 'id = ?',
+            whereArgs: [existing.id],
+          );
+        } else {
+          entryData['id'] = _uuid.v4();
+          entryData['created_at'] = now;
+          await txn.insert(DBConstants.tableShowroomDailyEntries, entryData);
+        }
+
+        // تدقيق
+        await txn.insert(DBConstants.tableAuditLogs, {
+          'id': _uuid.v4(),
+          'user_id': createdBy,
+          'module': 'المعرض',
+          'action': 'تسجيل حركة يومية',
+          'new_data': 'سحب $loadTotalPieces، مرتجع $returnTotalPieces للمنتج $productId بتاريخ $businessDate',
+          'device_id': deviceId,
+          'created_at': now,
+        });
+      }
+    });
+  }
+
   Future<void> saveEntry({
     required String businessDate,
     required String productId,
@@ -76,78 +209,20 @@ class ShowroomRepository {
     String? createdBy,
     String? deviceId,
   }) async {
-    if (await isDayClosed(businessDate)) {
-      throw Exception('لا يمكن التعديل على يومية مغلقة');
-    }
-
-    final db = await _dbHelper.database;
-    final now = DatabaseHelper.now;
-    final existing = await getEntry(businessDate, productId);
-
-    final loadTotalPieces = (loadBoxes * boxSize) + loadPieces;
-    final returnTotalPieces = (returnBoxes * boxSize) + returnPieces;
-    final loadValue = loadTotalPieces * retailPrice;
-    final returnValue = returnTotalPieces * retailPrice;
-    final netValue = loadValue - returnValue;
-
-    final previousRemaining = await getLastRemainingBeforeDate(businessDate, productId);
-    final remainingTotalPieces = previousRemaining + loadTotalPieces - returnTotalPieces;
-    final remainingBoxes = remainingTotalPieces ~/ boxSize;
-    final remainingPieces = remainingTotalPieces % boxSize;
-    final remainingValue = remainingTotalPieces * retailPrice;
-
-    await db.transaction((txn) async {
-      if (loadTotalPieces > 0) {
-        await _deductFromProductionStock(
-          txn, productId, loadTotalPieces, businessDate, createdBy, deviceId);
-      }
-
-      if (returnTotalPieces > 0) {
-        await _addToProductionStock(
-          txn, productId, returnTotalPieces, businessDate, createdBy, deviceId);
-      }
-
-      final entryData = {
-        'business_date': businessDate,
-        'product_id': productId,
-        'load_boxes': loadBoxes,
-        'load_pieces': loadPieces,
-        'load_total_pieces': loadTotalPieces,
-        'return_boxes': returnBoxes,
-        'return_pieces': returnPieces,
-        'return_total_pieces': returnTotalPieces,
-        'load_value': loadValue,
-        'return_value': returnValue,
-        'net_value': netValue,
-        'remaining_boxes': remainingBoxes,
-        'remaining_pieces': remainingPieces,
-        'remaining_value': remainingValue,
-        'updated_at': now,
-      };
-
-      if (existing != null) {
-        await txn.update(
-          DBConstants.tableShowroomDailyEntries,
-          entryData,
-          where: 'id = ?',
-          whereArgs: [existing.id],
-        );
-      } else {
-        entryData['id'] = _uuid.v4();
-        entryData['created_at'] = now;
-        await txn.insert(DBConstants.tableShowroomDailyEntries, entryData);
-      }
-
-      await txn.insert(DBConstants.tableAuditLogs, {
-        'id': _uuid.v4(),
-        'user_id': createdBy,
-        'module': 'المعرض',
-        'action': 'تسجيل حركة يومية',
-        'new_data': 'سحب $loadTotalPieces، مرتجع $returnTotalPieces للمنتج $productId بتاريخ $businessDate',
-        'device_id': deviceId,
-        'created_at': now,
-      });
-    });
+    await saveAllEntries(
+      businessDate: businessDate,
+      entries: [{
+        'productId': productId,
+        'loadBoxes': loadBoxes,
+        'loadPieces': loadPieces,
+        'returnBoxes': returnBoxes,
+        'returnPieces': returnPieces,
+        'boxSize': boxSize,
+        'retailPrice': retailPrice,
+      }],
+      createdBy: createdBy,
+      deviceId: deviceId,
+    );
   }
 
   Future<void> _deductFromProductionStock(DatabaseExecutor txn, String productId,
@@ -225,6 +300,7 @@ class ShowroomRepository {
   }
 
   // ========== ٢. العمال والمصاريف ==========
+
   Future<List<Map<String, dynamic>>> getActiveWorkers() async {
     final db = await _dbHelper.database;
     return await db.query(DBConstants.tableWorkers,
@@ -247,16 +323,13 @@ class ShowroomRepository {
     required String date,
     required bool present,
   }) async {
+    await _ensureDayOpen(date);
     final db = await _dbHelper.database;
     if (present) {
-      try {
-        await db.insert(DBConstants.tableWorkerAttendance, {
-          'id': _uuid.v4(),
-          'worker_id': workerId,
-          'date': date,
-          'created_at': DatabaseHelper.now,
-        });
-      } catch (_) {}
+      await db.rawInsert('''
+        INSERT OR REPLACE INTO ${DBConstants.tableWorkerAttendance} (id, worker_id, date, created_at)
+        VALUES (?, ?, ?, ?)
+      ''', [_uuid.v4(), workerId, date, DatabaseHelper.now]);
     } else {
       await db.delete(DBConstants.tableWorkerAttendance,
           where: 'worker_id = ? AND date = ?', whereArgs: [workerId, date]);
@@ -270,6 +343,7 @@ class ShowroomRepository {
     String? createdBy,
     String? deviceId,
   }) async {
+    await _ensureDayOpen(date);
     final db = await _dbHelper.database;
     final now = DatabaseHelper.now;
     await db.insert(DBConstants.tableWorkerAccounts, {
@@ -288,15 +362,17 @@ class ShowroomRepository {
 
   Future<List<Map<String, dynamic>>> getWorkerAdvances(String date) async {
     final db = await _dbHelper.database;
-    return [];
+    return await db.rawQuery('''
+      SELECT wa.*, w.name as worker_name
+      FROM ${DBConstants.tableWorkerAccounts} wa
+      JOIN ${DBConstants.tableWorkers} w ON wa.worker_id = w.id
+      WHERE wa.transaction_type = 'سلفة (برانية)'
+        AND wa.transaction_date = ?
+      ORDER BY wa.created_at
+    ''', [date]);
   }
 
   // ========== ٣. الخرج اليومي ==========
-  Future<bool> isDayClosed(String businessDate) async {
-    final account = await getDailyAccount(businessDate);
-    if (account == null) return false;
-    return (account['closed'] as int? ?? 0) == 1;
-  }
 
   Future<List<Map<String, dynamic>>> getDailyExpenses(String businessDate, {String category = 'expense'}) async {
     final db = await _dbHelper.database;
@@ -314,10 +390,7 @@ class ShowroomRepository {
     String? createdBy,
     String? deviceId,
   }) async {
-    if (await isDayClosed(businessDate)) {
-      throw Exception('لا يمكن التعديل على يومية مغلقة');
-    }
-
+    await _ensureDayOpen(businessDate);
     final db = await _dbHelper.database;
     final now = DatabaseHelper.now;
     await db.transaction((txn) async {
@@ -355,9 +428,7 @@ class ShowroomRepository {
     String? createdBy,
     String? deviceId,
   }) async {
-    if (await isDayClosed(businessDate)) {
-      throw Exception('لا يمكن التعديل على يومية مغلقة');
-    }
+    await _ensureDayOpen(businessDate);
     await saveDailyExpenses(
       businessDate: businessDate,
       expenses: entries,
@@ -368,6 +439,7 @@ class ShowroomRepository {
   }
 
   // ========== ٤. كشف الحساب الرسمي ==========
+
   Future<Map<String, dynamic>?> getDailyAccount(String businessDate) async {
     final db = await _dbHelper.database;
     final results = await db.query(DBConstants.tableShowroomDailyAccount,
@@ -400,117 +472,125 @@ class ShowroomRepository {
   }) async {
     final db = await _dbHelper.database;
     final now = DatabaseHelper.now;
-    final data = {
-      'business_date': businessDate,
-      'previous_remaining_value': previousRemainingValue,
-      'total_load_value': totalLoadValue,
-      'total_return_value': totalReturnValue,
-      'net_goods_value': netGoodsValue,
-      'total_worker_expenses': totalWorkerExpenses,
-      'total_worker_advances': totalWorkerAdvances,
-      'total_daily_expenses': totalDailyExpenses + totalSmallLedger, // مجتمعين
-      'other_income': otherIncome,
-      'showroom_expense': showroomExpense,
-      'total_due': totalDue,
-      'cash_received': cashReceived,
-      'cash_confirmed': cashConfirmed ? 1 : 0,
-      'confirmed_by': confirmedBy,
-      'result_amount': resultAmount,
-      'result_status': resultStatus,
-      'closed': closed ? 1 : 0,
-      'closed_by': closedBy,
-      'closed_at': closed ? now : null,
-      'updated_at': now,
-    };
+    final combinedDailyExpenses = totalDailyExpenses + totalSmallLedger;
 
-    final existing = await getDailyAccount(businessDate);
-    if (existing != null) {
-      await db.update(DBConstants.tableShowroomDailyAccount, data,
-          where: 'business_date = ?', whereArgs: [businessDate]);
-    } else {
-      data['id'] = _uuid.v4();
-      data['created_at'] = now;
-      await db.insert(DBConstants.tableShowroomDailyAccount, data);
-    }
+    await db.transaction((txn) async {
+      final data = {
+        'business_date': businessDate,
+        'previous_remaining_value': previousRemainingValue,
+        'total_load_value': totalLoadValue,
+        'total_return_value': totalReturnValue,
+        'net_goods_value': netGoodsValue,
+        'total_worker_expenses': totalWorkerExpenses,
+        'total_worker_advances': totalWorkerAdvances,
+        'total_daily_expenses': combinedDailyExpenses,
+        'other_income': otherIncome,
+        'showroom_expense': showroomExpense,
+        'total_due': totalDue,
+        'cash_received': cashReceived,
+        'cash_confirmed': cashConfirmed ? 1 : 0,
+        'confirmed_by': confirmedBy,
+        'result_amount': resultAmount,
+        'result_status': resultStatus,
+        'closed': closed ? 1 : 0,
+        'closed_by': closedBy,
+        'closed_at': closed ? now : null,
+        'updated_at': now,
+      };
 
-    // إذا تم إغلاق اليومية، نسجل قيود الخزنة والمصاريف
-    if (closed) {
-      // قيد توريد نقدي للخزنة
-      if (cashReceived > 0) {
-        await db.insert(DBConstants.tableTreasury, {
-          'id': _uuid.v4(),
-          'transaction_number': 'SHW-$businessDate-${DateTime.now().millisecondsSinceEpoch}',
-          'transaction_type': DBConstants.txnTypeReceipt,
-          'amount': cashReceived,
-          'source_module': 'معرض',
-          'source_id': businessDate,
-          'payment_method': 'نقدي',
-          'note': 'توريد نقدي من المعرض عن يوم $businessDate',
-          'transaction_date': businessDate,
-          'status': DBConstants.statusApproved,
-          'approved_by': closedBy ?? createdBy,
-          'created_at': now,
-          'updated_at': now,
-          'created_by': createdBy,
-          'device_id': deviceId,
-          'sync_status': 'Pending',
-          'deleted': 0,
-        });
+      final existing = await txn.query(
+        DBConstants.tableShowroomDailyAccount,
+        where: 'business_date = ?',
+        whereArgs: [businessDate],
+      );
+
+      if (existing.isNotEmpty) {
+        await txn.update(DBConstants.tableShowroomDailyAccount, data,
+            where: 'business_date = ?', whereArgs: [businessDate]);
+      } else {
+        data['id'] = _uuid.v4();
+        data['created_at'] = now;
+        await txn.insert(DBConstants.tableShowroomDailyAccount, data);
       }
 
-      // قيد مصروف يومي إجمالي (الخرج اليومي فقط، بدون الكشف الصغير)
-      if (totalDailyExpenses > 0) {
-        await db.insert(DBConstants.tableExpenses, {
+      if (closed) {
+        // قيد الخزنة
+        if (cashReceived > 0) {
+          await txn.insert(DBConstants.tableTreasury, {
+            'id': _uuid.v4(),
+            'transaction_number': 'SHW-$businessDate-${DateTime.now().millisecondsSinceEpoch}',
+            'transaction_type': DBConstants.txnTypeReceipt,
+            'amount': cashReceived,
+            'source_module': 'معرض',
+            'source_id': businessDate,
+            'payment_method': 'نقدي',
+            'note': 'توريد نقدي من المعرض عن يوم $businessDate',
+            'transaction_date': businessDate,
+            'status': DBConstants.statusApproved,
+            'approved_by': closedBy ?? createdBy,
+            'created_at': now,
+            'updated_at': now,
+            'created_by': createdBy,
+            'device_id': deviceId,
+            'sync_status': 'Pending',
+            'deleted': 0,
+          });
+        }
+
+        // قيد الخرج اليومي (منفصل)
+        if (totalDailyExpenses > 0) {
+          await txn.insert(DBConstants.tableExpenses, {
+            'id': _uuid.v4(),
+            'title': 'مصاريف يومية - معرض $businessDate',
+            'category': 'مصاريف معرض',
+            'amount': totalDailyExpenses,
+            'note': 'إجمالي الخرج اليومي للمعرض',
+            'expense_date': businessDate,
+            'status': DBConstants.statusApproved,
+            'approved_by': closedBy ?? createdBy,
+            'created_at': now,
+            'updated_at': now,
+            'created_by': createdBy,
+            'device_id': deviceId,
+            'sync_status': 'Pending',
+            'deleted': 0,
+          });
+        }
+
+        // قيد الكشف الصغير (منفصل)
+        if (totalSmallLedger > 0) {
+          await txn.insert(DBConstants.tableExpenses, {
+            'id': _uuid.v4(),
+            'title': 'كشف صغير - معرض $businessDate',
+            'category': 'مصاريف معرض',
+            'amount': totalSmallLedger,
+            'note': 'إجمالي الكشف الصغير للمعرض',
+            'expense_date': businessDate,
+            'status': DBConstants.statusApproved,
+            'approved_by': closedBy ?? createdBy,
+            'created_at': now,
+            'updated_at': now,
+            'created_by': createdBy,
+            'device_id': deviceId,
+            'sync_status': 'Pending',
+            'deleted': 0,
+          });
+        }
+
+        // Audit للإغلاق
+        await txn.insert(DBConstants.tableAuditLogs, {
           'id': _uuid.v4(),
-          'title': 'مصاريف يومية - معرض $businessDate',
-          'category': 'مصاريف معرض',
-          'amount': totalDailyExpenses,
-          'note': 'إجمالي الخرج اليومي للمعرض',
-          'expense_date': businessDate,
-          'status': DBConstants.statusApproved,
-          'approved_by': closedBy ?? createdBy,
-          'created_at': now,
-          'updated_at': now,
-          'created_by': createdBy,
+          'user_id': createdBy,
+          'module': 'المعرض',
+          'action': 'إغلاق يومية المعرض',
+          'new_data': 'تاريخ $businessDate، نتيجة ${resultAmount.toStringAsFixed(2)} ($resultStatus)',
           'device_id': deviceId,
-          'sync_status': 'Pending',
-          'deleted': 0,
+          'created_at': now,
         });
       }
-
-      // قيد الكشف الصغير (مصروف منفصل)
-      if (totalSmallLedger > 0) {
-        await db.insert(DBConstants.tableExpenses, {
-          'id': _uuid.v4(),
-          'title': 'كشف صغير - معرض $businessDate',
-          'category': 'مصاريف معرض',
-          'amount': totalSmallLedger,
-          'note': 'إجمالي الكشف الصغير للمعرض',
-          'expense_date': businessDate,
-          'status': DBConstants.statusApproved,
-          'approved_by': closedBy ?? createdBy,
-          'created_at': now,
-          'updated_at': now,
-          'created_by': createdBy,
-          'device_id': deviceId,
-          'sync_status': 'Pending',
-          'deleted': 0,
-        });
-      }
-    }
-
-    await db.insert(DBConstants.tableAuditLogs, {
-      'id': _uuid.v4(),
-      'user_id': createdBy,
-      'module': 'المعرض',
-      'action': closed ? 'إغلاق يومية المعرض' : 'تحديث كشف حساب المعرض',
-      'new_data': 'تاريخ $businessDate، نتيجة ${resultAmount.toStringAsFixed(2)} ($resultStatus)',
-      'device_id': deviceId,
-      'created_at': now,
     });
   }
 
-  /// تأكيد استلام النقدية فقط (بدون إغلاق)
   Future<void> confirmCash({
     required String businessDate,
     required bool confirmed,
@@ -543,6 +623,7 @@ class ShowroomRepository {
   }
 
   // ========== ٥. قات العمال ==========
+
   Future<List<Map<String, dynamic>>> getKhatEntries(String businessDate) async {
     final db = await _dbHelper.database;
     return await db.query(DBConstants.tableShowroomKhat,
@@ -555,10 +636,7 @@ class ShowroomRepository {
     String? createdBy,
     String? deviceId,
   }) async {
-    if (await isDayClosed(businessDate)) {
-      throw Exception('لا يمكن التعديل على يومية مغلقة');
-    }
-
+    await _ensureDayOpen(businessDate);
     final db = await _dbHelper.database;
     final now = DatabaseHelper.now;
     await db.transaction((txn) async {
@@ -583,6 +661,7 @@ class ShowroomRepository {
   }
 
   // ========== دوال تكميلية ==========
+
   Future<int> getAvailableStock(String productId) async {
     final db = await _dbHelper.database;
     final rows = await db.query(
@@ -604,6 +683,7 @@ class ShowroomRepository {
     String? createdBy,
     String? deviceId,
   }) async {
+    await _ensureDayOpen(date);
     final db = await _dbHelper.database;
     final now = DatabaseHelper.now;
     await db.insert(DBConstants.tableWorkerAccounts, {
