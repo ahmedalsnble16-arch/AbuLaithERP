@@ -20,6 +20,16 @@ class ShowroomRepository {
     return ShowroomDailyEntry.fromMap(maps.first);
   }
 
+  // جلب مدور الأمس لمنتج معين
+  Future<int> getYesterdayRemaining(String todayDate, String productId) async {
+    final yesterday = DateTime.parse(todayDate)
+        .subtract(const Duration(days: 1))
+        .toIso8601String()
+        .substring(0, 10);
+    final entry = await getEntry(yesterday, productId);
+    return entry?.remainingTotalPieces ?? 0;
+  }
+
   Future<List<ShowroomDailyEntry>> getDailyEntries(String businessDate) async {
     final db = await _dbHelper.database;
     final maps = await db.query(
@@ -274,23 +284,33 @@ class ShowroomRepository {
   }
 
   // ========== ٣. الخرج اليومي ==========
-  Future<List<Map<String, dynamic>>> getDailyExpenses(String businessDate) async {
+  // جلب الخرج اليومي (مع إمكانية تصفية حسب الفئة)
+  Future<List<Map<String, dynamic>>> getDailyExpenses(String businessDate, {String category = 'expense'}) async {
     final db = await _dbHelper.database;
-    return await db.query(DBConstants.tableShowroomDailyExpenses,
-        where: 'business_date = ?', whereArgs: [businessDate]);
+    return await db.query(
+      DBConstants.tableShowroomDailyExpenses,
+      where: 'business_date = ? AND category = ?',
+      whereArgs: [businessDate, category],
+    );
   }
 
+  // حفظ الخرج اليومي (مع تحديد الفئة)
   Future<void> saveDailyExpenses({
     required String businessDate,
     required List<Map<String, dynamic>> expenses,
+    String category = 'expense',
     String? createdBy,
     String? deviceId,
   }) async {
     final db = await _dbHelper.database;
     final now = DatabaseHelper.now;
     await db.transaction((txn) async {
-      await txn.delete(DBConstants.tableShowroomDailyExpenses,
-          where: 'business_date = ?', whereArgs: [businessDate]);
+      // حذف القديم لنفس اليوم ونفس الفئة
+      await txn.delete(
+        DBConstants.tableShowroomDailyExpenses,
+        where: 'business_date = ? AND category = ?',
+        whereArgs: [businessDate, category],
+      );
       for (var exp in expenses) {
         final amount = (exp['amount'] as num?)?.toDouble() ?? 0;
         final details = exp['details']?.toString() ?? '';
@@ -298,6 +318,7 @@ class ShowroomRepository {
           await txn.insert(DBConstants.tableShowroomDailyExpenses, {
             'id': exp['id'] ?? _uuid.v4(),
             'business_date': businessDate,
+            'category': category,
             'amount': amount,
             'details': details,
             'created_at': now,
@@ -307,6 +328,26 @@ class ShowroomRepository {
         }
       }
     });
+  }
+
+  // دوال خاصة بالكشف الصغير
+  Future<List<Map<String, dynamic>>> getSmallLedger(String businessDate) async {
+    return await getDailyExpenses(businessDate, category: 'small_ledger');
+  }
+
+  Future<void> saveSmallLedger({
+    required String businessDate,
+    required List<Map<String, dynamic>> entries,
+    String? createdBy,
+    String? deviceId,
+  }) async {
+    await saveDailyExpenses(
+      businessDate: businessDate,
+      expenses: entries,
+      category: 'small_ledger',
+      createdBy: createdBy,
+      deviceId: deviceId,
+    );
   }
 
   // ========== ٤. كشف الحساب الرسمي ==========
