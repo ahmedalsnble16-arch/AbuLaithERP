@@ -29,6 +29,15 @@ class DBConstants {
   static const String tableDistributorLoadReturns = 'distributor_load_returns';
   static const String tableDistributorLoadDamage = 'distributor_load_damage';
   static const String tableDailyRemaining = 'daily_remaining';
+
+  // ============ جداول المعرض ============
+  static const String tableShowroomDailyEntries = 'showroom_daily_entries';
+  static const String tableShowroomDailyAccount = 'showroom_daily_account';
+  static const String tableShowroomDailyExpenses = 'showroom_daily_expenses';
+  static const String tableShowroomKhat = 'showroom_khat';
+  static const String tableWorkerAttendance = 'worker_attendance';
+  static const String tableWorkerDailyExpenses = 'worker_daily_expenses';
+
   static const String tableWorkers = 'workers';
   static const String tableWorkerAccounts = 'worker_accounts';
   static const String tableTreasury = 'treasury';
