@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../config/theme.dart';
 import '../../core/constants/db_constants.dart';
 import '../../core/database/database_helper.dart';
 
@@ -10,145 +11,502 @@ class AllLoadsScreen extends StatefulWidget {
 }
 
 class _AllLoadsScreenState extends State<AllLoadsScreen> {
+  final DatabaseHelper _dbHelper = DatabaseHelper();
+
   List<Map<String, dynamic>> _products = [];
   List<Map<String, dynamic>> _distributors = [];
   Map<String, Map<String, int>> _loadData = {};
   Map<String, int> _showroomData = {};
+
+  DateTime _fromDate = DateTime.now().subtract(const Duration(days: 30));
+  DateTime _toDate = DateTime.now();
+  String? _filterDistributorId;
+  String? _filterProductId;
+  String _searchQuery = '';
   bool _isLoading = true;
-  String _selectedDate = DateTime.now().toIso8601String().substring(0, 10);
+
+  // حالة الترتيب
+  String? _sortColumn;
+  bool _sortAscending = true;
 
   @override
   void initState() {
     super.initState();
-    fetchData();
+    _loadData();
   }
 
-  Future<void> fetchData() async {
+  Future<void> _loadData() async {
     setState(() => _isLoading = true);
-    final db = await DatabaseHelper().database;
+    try {
+      final db = await _dbHelper.database;
 
-    final products = await db.query(DBConstants.tableProducts, where: 'deleted = 0');
-    final distributors = await db.query(DBConstants.tableDistributors, where: 'deleted = 0');
+      _products = await db.query(DBConstants.tableProducts,
+          where: 'active = 1 AND deleted = 0', orderBy: 'name ASC');
 
-    final loadMovements = await db.rawQuery('''
-      SELECT sm.product_id, dl.distributor_id, COALESCE(SUM(ABS(sm.quantity)), 0) as total_loaded
-      FROM ${DBConstants.tableStockMovements} sm
-      INNER JOIN ${DBConstants.tableDistributorLoads} dl ON sm.reference_id = dl.id
-      WHERE sm.movement_type = 'تحميل موزع' AND sm.created_at LIKE ?
-      GROUP BY sm.product_id, dl.distributor_id
-    ''', ['$_selectedDate%']);
+      _distributors = await db.query(DBConstants.tableDistributors,
+          where: 'active = 1 AND deleted = 0', orderBy: 'name ASC');
 
-    final showroomMovements = await db.rawQuery('''
-      SELECT sm.product_id, COALESCE(SUM(ABS(sm.quantity)), 0) as total_to_showroom
-      FROM ${DBConstants.tableStockMovements} sm
-      WHERE sm.movement_type = 'تحويل' AND sm.reference_type = 'showroom' AND sm.created_at LIKE ?
-      GROUP BY sm.product_id
-    ''', ['$_selectedDate%']);
+      final fromStr = _fromDate.toIso8601String().substring(0, 10);
+      final toStr = _toDate.toIso8601String().substring(0, 10);
 
-    final loadMap = <String, Map<String, int>>{};
-    for (var row in loadMovements) {
-      final productId = row['product_id'] as String;
-      final distId = row['distributor_id'] as String;
-      final qty = (row['total_loaded'] as num?)?.toInt() ?? 0;
-      loadMap[productId] ??= {};
-      loadMap[productId]![distId] = qty;
+      // تحميلات الموزعين
+      final distLoads = await db.rawQuery('''
+        SELECT dli.product_id, dl.distributor_id, SUM(dli.quantity) as total
+        FROM ${DBConstants.tableDistributorLoadItems} dli
+        JOIN ${DBConstants.tableDistributorLoads} dl ON dli.load_id = dl.id
+        WHERE dl.load_date BETWEEN ? AND ?
+        GROUP BY dli.product_id, dl.distributor_id
+      ''', [fromStr, toStr]);
+
+      _loadData.clear();
+      for (var row in distLoads) {
+        final pId = row['product_id'] as String;
+        final dId = row['distributor_id'] as String;
+        final qty = (row['total'] as num?)?.toInt() ?? 0;
+        _loadData[pId] ??= {};
+        _loadData[pId]![dId] = qty;
+      }
+
+      // تحميلات المعرض
+      final showroomLoads = await db.rawQuery('''
+        SELECT product_id, SUM(load_total_pieces) as total
+        FROM ${DBConstants.tableShowroomDailyEntries}
+        WHERE business_date BETWEEN ? AND ?
+        GROUP BY product_id
+      ''', [fromStr, toStr]);
+
+      _showroomData.clear();
+      for (var row in showroomLoads) {
+        _showroomData[row['product_id'] as String] =
+            (row['total'] as num?)?.toInt() ?? 0;
+      }
+    } catch (e) {
+      debugPrint('Error loading loads data: $e');
     }
-
-    final showroomMap = <String, int>{};
-    for (var row in showroomMovements) {
-      showroomMap[row['product_id'] as String] = (row['total_to_showroom'] as num?)?.toInt() ?? 0;
-    }
-
-    setState(() {
-      _products = products;
-      _distributors = distributors;
-      _loadData = loadMap;
-      _showroomData = showroomMap;
-      _isLoading = false;
-    });
+    setState(() => _isLoading = false);
   }
 
-  String _formatPieces(int pieces, int boxSize) {
-    if (boxSize <= 0) return '$pieces';
-    final boxes = pieces ~/ boxSize;
-    final remaining = pieces % boxSize;
-    return '$boxes.$remaining';
+  int _getDistributorLoad(String productId, String distributorId) {
+    return _loadData[productId]?[distributorId] ?? 0;
+  }
+
+  int _getShowroomLoad(String productId) {
+    return _showroomData[productId] ?? 0;
   }
 
   int _getRowTotal(String productId) {
-    int total = 0;
-    for (var dist in _distributors) {
-      total += _loadData[productId]?[dist['id']] ?? 0;
+    int total = _getShowroomLoad(productId);
+    for (var d in _distributors) {
+      total += _getDistributorLoad(productId, d['id'] as String);
     }
-    total += _showroomData[productId] ?? 0;
     return total;
+  }
+
+  String _formatPieces(int totalPieces, int boxSize) {
+    if (boxSize <= 0) return totalPieces.toString();
+    final boxes = totalPieces ~/ boxSize;
+    final pieces = totalPieces % boxSize;
+    return '$boxes.$pieces';
+  }
+
+  int _getBoxSize(String productId) {
+    final p = _products.firstWhere((e) => e['id'] == productId,
+        orElse: () => {'pieces_per_box': 60});
+    return p['pieces_per_box'] as int? ?? 60;
+  }
+
+  /// نافذة تفاصيل التحميل (بدون تعديل)
+  Future<void> _showLoadDetails(String productId, String distributorId) async {
+    final db = await _dbHelper.database;
+    final fromStr = _fromDate.toIso8601String().substring(0, 10);
+    final toStr = _toDate.toIso8601String().substring(0, 10);
+
+    // جلب التفاصيل الفردية من بنود التحميل
+    final details = await db.rawQuery('''
+      SELECT dli.quantity, dl.load_date, dl.created_at
+      FROM ${DBConstants.tableDistributorLoadItems} dli
+      JOIN ${DBConstants.tableDistributorLoads} dl ON dli.load_id = dl.id
+      WHERE dli.product_id = ? AND dl.distributor_id = ?
+        AND dl.load_date BETWEEN ? AND ?
+      ORDER BY dl.load_date DESC, dl.created_at DESC
+    ''', [productId, distributorId, fromStr, toStr]);
+
+    if (!mounted) return;
+
+    final productName = _products.firstWhere((e) => e['id'] == productId,
+        orElse: () => {'name': ''})['name'] ?? '';
+    final distName = _distributors.firstWhere((e) => e['id'] == distributorId,
+        orElse: () => {'name': ''})['name'] ?? '';
+    final boxSize = _getBoxSize(productId);
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('تفاصيل تحميل $productName إلى $distName'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('الفترة: $_fromDate - $_toDate'),
+              const Divider(),
+              if (details.isEmpty)
+                const Text('لا توجد حركات تحميل في هذه الفترة')
+              else
+                ...details.map((d) => ListTile(
+                      dense: true,
+                      title: Text(
+                          'الكمية: ${_formatPieces(d['quantity'] as int? ?? 0, boxSize)} (${d['quantity']} قطعة)'),
+                      subtitle: Text(
+                          'التاريخ: ${d['load_date']} - الوقت: ${(d['created_at'] as String? ?? '').substring(11, 19)}'),
+                    )),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إغلاق')),
+        ],
+      ),
+    );
+  }
+
+  /// نافذة تفاصيل تحميل المعرض
+  Future<void> _showShowroomDetails(String productId) async {
+    final db = await _dbHelper.database;
+    final fromStr = _fromDate.toIso8601String().substring(0, 10);
+    final toStr = _toDate.toIso8601String().substring(0, 10);
+
+    final details = await db.query(
+      DBConstants.tableShowroomDailyEntries,
+      where: 'product_id = ? AND business_date BETWEEN ? AND ?',
+      whereArgs: [productId, fromStr, toStr],
+      orderBy: 'business_date DESC',
+    );
+
+    if (!mounted) return;
+
+    final productName = _products.firstWhere((e) => e['id'] == productId,
+        orElse: () => {'name': ''})['name'] ?? '';
+    final boxSize = _getBoxSize(productId);
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('تفاصيل تحميل المعرض - $productName'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('الفترة: $_fromDate - $_toDate'),
+              const Divider(),
+              if (details.isEmpty)
+                const Text('لا توجد تحميلات للمعرض في هذه الفترة')
+              else
+                ...details.map((d) {
+                  final loadBoxes = d['load_boxes'] as int? ?? 0;
+                  final loadPieces = d['load_pieces'] as int? ?? 0;
+                  final totalPieces = d['load_total_pieces'] as int? ?? 0;
+                  return ListTile(
+                    dense: true,
+                    title: Text('$loadBoxes سلة + $loadPieces قطعة (إجمالي $totalPieces قطعة)'),
+                    subtitle: Text('التاريخ: ${d['business_date']}'),
+                  );
+                }),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إغلاق')),
+        ],
+      ),
+    );
+  }
+
+  List<Map<String, dynamic>> get _filteredProducts {
+    var list = _products;
+    if (_searchQuery.isNotEmpty) {
+      list = list
+          .where((p) =>
+              (p['name'] ?? '').toString().toLowerCase().contains(_searchQuery.toLowerCase()))
+          .toList();
+    }
+    if (_filterProductId != null) {
+      list = list.where((p) => p['id'] == _filterProductId).toList();
+    }
+    return list;
+  }
+
+  List<Map<String, dynamic>> get _filteredDistributors {
+    if (_filterDistributorId != null) {
+      return _distributors.where((d) => d['id'] == _filterDistributorId).toList();
+    }
+    return _distributors;
+  }
+
+  void _sort<T>(List<Map<String, dynamic>> list, String column, bool ascending, T Function(Map<String, dynamic>) getter) {
+    list.sort((a, b) {
+      final aVal = getter(a);
+      final bVal = getter(b);
+      return ascending ? Comparable.compare(aVal as Comparable, bVal as Comparable)
+          : Comparable.compare(bVal as Comparable, aVal as Comparable);
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('جدول الحملات الكلي')),
+      appBar: AppBar(
+        title: const Text('جدول الحملات الكلي'),
+        actions: [
+          IconButton(icon: const Icon(Icons.refresh), onPressed: _loadData),
+          IconButton(icon: const Icon(Icons.print), onPressed: () {}),
+          IconButton(icon: const Icon(Icons.file_download), onPressed: () {}),
+        ],
+      ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : Column(
               children: [
-                Padding(
-                  padding: const EdgeInsets.all(8.0),
-                  child: Row(
-                    children: [
-                      const Text('التاريخ: '),
-                      Expanded(
-                        child: TextField(
-                          decoration: const InputDecoration(hintText: 'YYYY-MM-DD'),
-                          controller: TextEditingController(text: _selectedDate),
-                          onSubmitted: (v) {
-                            _selectedDate = v;
-                            fetchData();
-                          },
-                        ),
-                      ),
-                      IconButton(icon: const Icon(Icons.search), onPressed: fetchData),
-                    ],
-                  ),
-                ),
+                _buildFilterBar(),
                 Expanded(
-                  child: _products.isEmpty
-                      ? const Center(child: Text('لا توجد منتجات'))
-                      : SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
-                          child: SingleChildScrollView(
-                            child: DataTable(
-                              columnSpacing: 12,
-                              columns: [
-                                const DataColumn(label: Text('المنتج')),
-                                const DataColumn(label: Text('سلة')),
-                                ...(_distributors.map((d) => DataColumn(label: Text(d['name'] ?? '')))),
-                                const DataColumn(label: Text('المعرض')),
-                                const DataColumn(label: Text('الإجمالي')),
-                                const DataColumn(label: Text('سلال+قطع')),
-                              ],
-                              rows: _products.map((product) {
-                                final productId = product['id'] as String;
-                                final boxSize = product['pieces_per_box'] as int? ?? 60;
-                                final rowTotal = _getRowTotal(productId);
-                                return DataRow(cells: [
-                                  DataCell(Text(product['name'] ?? '')),
-                                  DataCell(Text('$boxSize')),
-                                  ...(_distributors.map((dist) {
-                                    final qty = _loadData[productId]?[dist['id']] ?? 0;
-                                    return DataCell(Text(qty > 0 ? _formatPieces(qty, boxSize) : '-'));
-                                  })),
-                                  DataCell(Text(_showroomData[productId] != null ? _formatPieces(_showroomData[productId]!, boxSize) : '-')),
-                                  DataCell(Text('$rowTotal', style: const TextStyle(fontWeight: FontWeight.bold))),
-                                  DataCell(Text(_formatPieces(rowTotal, boxSize), style: const TextStyle(fontWeight: FontWeight.bold))),
-                                ]);
-                              }).toList(),
-                            ),
-                          ),
-                        ),
+                  child: _buildTable(),
                 ),
               ],
             ),
+    );
+  }
+
+  Widget _buildFilterBar() {
+    return Container(
+      padding: const EdgeInsets.all(8),
+      color: Theme.of(context).primaryColor.withAlpha(10),
+      child: Column(
+        children: [
+          // أزرار سريعة للتاريخ
+          Row(
+            children: [
+              _quickDateButton('اليوم', DateTime.now(), DateTime.now()),
+              const SizedBox(width: 8),
+              _quickDateButton('أمس', DateTime.now().subtract(const Duration(days: 1)), DateTime.now().subtract(const Duration(days: 1))),
+              const SizedBox(width: 8),
+              _quickDateButton('آخر 7 أيام', DateTime.now().subtract(const Duration(days: 6)), DateTime.now()),
+              const SizedBox(width: 8),
+              _quickDateButton('الشهر', DateTime(DateTime.now().year, DateTime.now().month, 1), DateTime.now()),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              ElevatedButton.icon(
+                icon: const Icon(Icons.date_range),
+                label: Text(
+                    '${_fromDate.toLocal().toString().substring(0, 10)} - ${_toDate.toLocal().toString().substring(0, 10)}'),
+                onPressed: () async {
+                  final picked = await showDateRangePicker(
+                    context: context,
+                    firstDate: DateTime(2020),
+                    lastDate: DateTime(2030),
+                    initialDateRange: DateTimeRange(start: _fromDate, end: _toDate),
+                  );
+                  if (picked != null) {
+                    setState(() {
+                      _fromDate = picked.start;
+                      _toDate = picked.end;
+                    });
+                    _loadData();
+                  }
+                },
+              ),
+              DropdownButton<String?>(
+                hint: const Text('كل الموزعين'),
+                value: _filterDistributorId,
+                items: [
+                  const DropdownMenuItem(value: null, child: Text('كل الموزعين')),
+                  ..._distributors.map((d) => DropdownMenuItem(
+                      value: d['id'] as String, child: Text(d['name'] ?? ''))),
+                ],
+                onChanged: (val) => setState(() => _filterDistributorId = val),
+              ),
+              DropdownButton<String?>(
+                hint: const Text('كل المنتجات'),
+                value: _filterProductId,
+                items: [
+                  const DropdownMenuItem(value: null, child: Text('كل المنتجات')),
+                  ..._products.map((p) => DropdownMenuItem(
+                      value: p['id'] as String, child: Text(p['name'] ?? ''))),
+                ],
+                onChanged: (val) => setState(() => _filterProductId = val),
+              ),
+              SizedBox(
+                width: 200,
+                child: TextField(
+                  decoration: const InputDecoration(
+                      hintText: 'بحث...', isDense: true, border: OutlineInputBorder()),
+                  onChanged: (v) => setState(() => _searchQuery = v),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _quickDateButton(String label, DateTime start, DateTime end) {
+    return TextButton(
+      onPressed: () {
+        setState(() {
+          _fromDate = start;
+          _toDate = end;
+        });
+        _loadData();
+      },
+      child: Text(label, style: const TextStyle(fontSize: 12)),
+    );
+  }
+
+  Widget _buildTable() {
+    final filteredProducts = _filteredProducts;
+    final filteredDistributors = _filteredDistributors;
+
+    // حساب إجماليات الأعمدة
+    final Map<String, int> columnTotals = {};
+    int grandTotal = 0;
+
+    // --- الفرز ---
+    if (_sortColumn != null) {
+      switch (_sortColumn) {
+        case 'name':
+          _sort(filteredProducts, 'name', _sortAscending, (p) => p['name'] ?? '');
+          break;
+        case 'showroom':
+          _sort(filteredProducts, 'showroom', _sortAscending, (p) => _getShowroomLoad(p['id']));
+          break;
+        case 'total':
+          _sort(filteredProducts, 'total', _sortAscending, (p) => _getRowTotal(p['id']));
+          break;
+        default:
+          // فرز حسب عمود موزع معين
+          final distId = _sortColumn;
+          _sort(filteredProducts, distId!, _sortAscending, (p) => _getDistributorLoad(p['id'], distId));
+      }
+    }
+
+    // بناء الصفوف
+    final List<DataRow> rows = [];
+    for (var product in filteredProducts) {
+      final productId = product['id'] as String;
+      final boxSize = _getBoxSize(productId);
+      final cells = <DataCell>[
+        DataCell(Text(product['name'] ?? '')),
+      ];
+
+      for (var d in filteredDistributors) {
+        final dId = d['id'] as String;
+        final qty = _getDistributorLoad(productId, dId);
+        columnTotals[dId] = (columnTotals[dId] ?? 0) + qty;
+        cells.add(DataCell(InkWell(
+          onTap: () => _showLoadDetails(productId, dId),
+          child: Text(qty > 0 ? _formatPieces(qty, boxSize) : '-'),
+        )));
+      }
+
+      final showroomQty = _getShowroomLoad(productId);
+      columnTotals['showroom'] = (columnTotals['showroom'] ?? 0) + showroomQty;
+      cells.add(DataCell(InkWell(
+        onTap: () => _showShowroomDetails(productId),
+        child: Text(showroomQty > 0 ? _formatPieces(showroomQty, boxSize) : '-'),
+      )));
+
+      final total = _getRowTotal(productId);
+      grandTotal += total;
+      cells.add(DataCell(Text(_formatPieces(total, boxSize),
+          style: const TextStyle(fontWeight: FontWeight.bold))));
+
+      rows.add(DataRow(cells: cells));
+    }
+
+    // صف الإجمالي
+    if (filteredProducts.isNotEmpty) {
+      final firstProductId = filteredProducts.first['id'] as String;
+      final totalCells = <DataCell>[
+        const DataCell(Text('الإجمالي', style: TextStyle(fontWeight: FontWeight.bold, color: AppTheme.primaryColor))),
+      ];
+      for (var d in filteredDistributors) {
+        final dId = d['id'] as String;
+        final boxSize = _getBoxSize(firstProductId);
+        totalCells.add(DataCell(Text(
+            _formatPieces(columnTotals[dId] ?? 0, boxSize),
+            style: const TextStyle(fontWeight: FontWeight.bold))));
+      }
+      totalCells.add(DataCell(Text(
+          _formatPieces(columnTotals['showroom'] ?? 0, _getBoxSize(firstProductId)),
+          style: const TextStyle(fontWeight: FontWeight.bold))));
+      totalCells.add(DataCell(Text(
+          _formatPieces(grandTotal, _getBoxSize(firstProductId)),
+          style: const TextStyle(fontWeight: FontWeight.bold, color: AppTheme.primaryColor))));
+
+      rows.add(DataRow(
+        cells: totalCells,
+        color: MaterialStateProperty.all(Theme.of(context).primaryColor.withAlpha(15)),
+      ));
+    }
+
+    // الأعمدة مع إمكانية الفرز
+    final columns = <DataColumn>[
+      DataColumn(
+        label: const Text('المنتج'),
+        onSort: (columnIndex, ascending) {
+          setState(() {
+            _sortColumn = 'name';
+            _sortAscending = ascending;
+          });
+        },
+      ),
+      ...filteredDistributors.map((d) => DataColumn(
+            label: Text(d['name'] ?? ''),
+            onSort: (columnIndex, ascending) {
+              setState(() {
+                _sortColumn = d['id'] as String;
+                _sortAscending = ascending;
+              });
+            },
+          )),
+      DataColumn(
+        label: const Text('المعرض'),
+        onSort: (columnIndex, ascending) {
+          setState(() {
+            _sortColumn = 'showroom';
+            _sortAscending = ascending;
+          });
+        },
+      ),
+      DataColumn(
+        label: const Text('الإجمالي'),
+        onSort: (columnIndex, ascending) {
+          setState(() {
+            _sortColumn = 'total';
+            _sortAscending = ascending;
+          });
+        },
+      ),
+    ];
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: DataTable(
+        columns: columns,
+        rows: rows,
+        columnSpacing: 12,
+        headingRowHeight: 40,
+        dataRowHeight: 40,
+        showBottomBorder: true,
+      ),
     );
   }
 }
