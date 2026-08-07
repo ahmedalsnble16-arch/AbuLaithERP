@@ -1,97 +1,155 @@
-import 'package:sqflite/sqflite.dart';
-import 'package:uuid/uuid.dart';
-import '../../core/constants/db_constants.dart';
-import '../../core/database/database_helper.dart';
-import '../models/distributor_damage_price.dart';
-import '../models/distributor_load_damage.dart';
+import 'package:flutter/material.dart';
+import '../../config/theme.dart';
+import '../../data/models/product.dart';
+import '../../data/repositories/product_repository.dart';
+import '../../data/repositories/distributor_product_price_repository.dart';
+import '../../data/repositories/distributor_damage_repository.dart' as damageRepo;
 
-class DistributorDamageRepository {
-  final DatabaseHelper _dbHelper = DatabaseHelper();
-  final Uuid _uuid = const Uuid();
+class DistributorPricesScreen extends StatefulWidget {
+  final String distributorId;
+  final String distributorName;
+  const DistributorPricesScreen({super.key, required this.distributorId, required this.distributorName});
 
-  // ========== أسعار التالف ==========
-  Future<Map<String, double>> getDamagePrices(String distributorId) async {
-    final db = await _dbHelper.database;
-    final maps = await db.query(
-      DBConstants.tableDistributorDamagePrices,
-      where: 'distributor_id = ?',
-      whereArgs: [distributorId],
-    );
-    return {for (var m in maps) m['damage_type'] as String: (m['price_per_piece'] as num).toDouble()};
+  @override
+  State<DistributorPricesScreen> createState() => _DistributorPricesScreenState();
+}
+
+class _DistributorPricesScreenState extends State<DistributorPricesScreen> {
+  final ProductRepository _productRepo = ProductRepository();
+  final DistributorProductPriceRepository _priceRepo = DistributorProductPriceRepository();
+  final damageRepo.DistributorDamageRepository _damageRepo = damageRepo.DistributorDamageRepository();
+
+  List<Product> _products = [];
+  Map<String, double> _prices = {};
+  Map<String, TextEditingController> _productControllers = {};
+
+  // أسعار التالف
+  Map<String, double> _damagePrices = {};
+  final TextEditingController _smallPriceCtrl = TextEditingController();
+  final TextEditingController _largePriceCtrl = TextEditingController();
+  final TextEditingController _tamerPriceCtrl = TextEditingController();
+
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
   }
 
-  Future<void> saveDamagePrice(String distributorId, String damageType, double price) async {
-    final db = await _dbHelper.database;
-    final now = DatabaseHelper.now;
-    await db.insert(
-      DBConstants.tableDistributorDamagePrices,
-      {
-        'id': _uuid.v4(),
-        'distributor_id': distributorId,
-        'damage_type': damageType,
-        'price_per_piece': price,
-        'created_at': now,
-        'updated_at': now,
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
-  }
+  Future<void> _load() async {
+    setState(() => _isLoading = true);
+    final products = await _productRepo.getAll();
+    final prices = await _priceRepo.getPricesForDistributor(widget.distributorId);
+    final damagePrices = await _damageRepo.getDamagePrices(widget.distributorId);
 
-  // ========== تسجيل تالف ==========
-  Future<void> recordDamage({
-    required String distributorId,
-    String? loadId,
-    required List<Map<String, dynamic>> damageItems,
-    String? createdBy,
-    String? deviceId,
-    DatabaseExecutor? txn,
-  }) async {
-    final db = txn ?? await _dbHelper.database;
-    final now = DatabaseHelper.now;
-    final user = createdBy ?? 'admin';
-    final device = deviceId ?? 'mobile';
+    setState(() {
+      _products = products.where((p) => p.active).toList();
+      _prices = prices;
+      _damagePrices = damagePrices;
 
-    for (var item in damageItems) {
-      final damageType = item['damageType'] as String;
-      final pieces = item['pieces'] as int;
-      final pricePerPiece = (item['pricePerPiece'] as num).toDouble();
-      final totalValue = pieces * pricePerPiece;
-
-      if (pieces > 0) {
-        await db.insert(DBConstants.tableDistributorLoadDamage, {
-          'id': _uuid.v4(),
-          'distributor_id': distributorId,
-          'load_id': loadId,
-          'damage_type': damageType,
-          'pieces': pieces,
-          'price_per_piece': pricePerPiece,
-          'total_value': totalValue,
-          'damage_date': DateTime.now().toIso8601String().substring(0, 10),
-          'created_at': now,
-          'created_by': user,
-          'device_id': device,
-          'sync_status': 'Pending',
-        });
+      for (var p in _products) {
+        _productControllers[p.id] = TextEditingController(
+          text: (_prices[p.id] ?? p.wholesalePrice).toString(),
+        );
       }
+      _smallPriceCtrl.text = (_damagePrices['صغير'] ?? 0).toString();
+      _largePriceCtrl.text = (_damagePrices['كبير'] ?? 0).toString();
+      _tamerPriceCtrl.text = (_damagePrices['تمرية كبير'] ?? 0).toString();
+
+      _isLoading = false;
+    });
+  }
+
+  Future<void> _save() async {
+    for (var p in _products) {
+      final price = double.tryParse(_productControllers[p.id]?.text ?? '') ?? p.wholesalePrice;
+      await _priceRepo.savePrice(widget.distributorId, p.id, price);
+    }
+    // حفظ أسعار التالف
+    await _damageRepo.saveDamagePrice(widget.distributorId, 'صغير', double.tryParse(_smallPriceCtrl.text) ?? 0);
+    await _damageRepo.saveDamagePrice(widget.distributorId, 'كبير', double.tryParse(_largePriceCtrl.text) ?? 0);
+    await _damageRepo.saveDamagePrice(widget.distributorId, 'تمرية كبير', double.tryParse(_tamerPriceCtrl.text) ?? 0);
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('تم حفظ الأسعار'), backgroundColor: AppTheme.successColor),
+      );
     }
   }
 
-  Future<double> getTotalDamageValue({
-    required String distributorId,
-    String? loadId,
-    DatabaseExecutor? txn,
-  }) async {
-    final db = txn ?? await _dbHelper.database;
-    String where = 'distributor_id = ?';
-    List<dynamic> args = [distributorId];
-    if (loadId != null) {
-      where += ' AND load_id = ?';
-      args.add(loadId);
-    }
-    final result = await db.rawQuery(
-      'SELECT COALESCE(SUM(total_value), 0) as total FROM ${DBConstants.tableDistributorLoadDamage} WHERE $where',
-      args,
+  @override
+  void dispose() {
+    for (var c in _productControllers.values) { c.dispose(); }
+    _smallPriceCtrl.dispose();
+    _largePriceCtrl.dispose();
+    _tamerPriceCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text('أسعار: ${widget.distributorName}')),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : SingleChildScrollView(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('أسعار المنتجات', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  ..._products.map((p) => Card(
+                        child: ListTile(
+                          title: Text(p.name),
+                          subtitle: Text('السلة: ${p.piecesPerBox} قطعة'),
+                          trailing: SizedBox(
+                            width: 100,
+                            child: TextField(
+                              controller: _productControllers[p.id],
+                              keyboardType: TextInputType.number,
+                              decoration: const InputDecoration(labelText: 'السعر'),
+                            ),
+                          ),
+                        ),
+                      )),
+                  const Divider(height: 32),
+                  const Text('أسعار التالف (للقطعة)', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
+                  _buildDamagePriceRow('صغير', _smallPriceCtrl),
+                  _buildDamagePriceRow('كبير', _largePriceCtrl),
+                  _buildDamagePriceRow('تمرية كبير', _tamerPriceCtrl),
+                  const SizedBox(height: 24),
+                  ElevatedButton.icon(
+                    onPressed: _save,
+                    icon: const Icon(Icons.save),
+                    label: const Text('حفظ جميع الأسعار'),
+                  ),
+                ],
+              ),
+            ),
     );
-    return (result.first['total'] as num?)?.toDouble() ?? 0.0;
+  }
+
+  Widget _buildDamagePriceRow(String label, TextEditingController ctrl) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(label),
+            SizedBox(
+              width: 100,
+              child: TextField(
+                controller: ctrl,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'سعر القطعة'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
