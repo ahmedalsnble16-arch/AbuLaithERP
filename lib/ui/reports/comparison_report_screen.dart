@@ -17,7 +17,8 @@ class _ComparisonReportScreenState extends State<ComparisonReportScreen> {
   Map<String, int> _showroomOut = {};
   Map<String, int> _distributorOut = {};
   Map<String, int> _showroomReturn = {};
-  Map<String, int> _distributorReturn = {};
+  Map<String, Map<String, int>> _distributorReturnsByDistributor = {};
+  List<Map<String, dynamic>> _distributors = [];
   Map<String, int> _currentStock = {};
   bool _isLoading = true;
   String _selectedDate = DateTime.now().toIso8601String().substring(0, 10);
@@ -42,8 +43,10 @@ class _ComparisonReportScreenState extends State<ComparisonReportScreen> {
   Future<void> _loadInitialData() async {
     final db = await DatabaseHelper().database;
     final products = await db.query(DBConstants.tableProducts, where: 'deleted = 0');
+    final distributors = await db.query(DBConstants.tableDistributors, where: 'deleted = 0');
     setState(() {
       _products = products;
+      _distributors = distributors;
       _isLoading = false;
     });
   }
@@ -51,11 +54,11 @@ class _ComparisonReportScreenState extends State<ComparisonReportScreen> {
   Future<void> _runComparison() async {
     setState(() => _isLoading = true);
     final db = await DatabaseHelper().database;
-
     final yesterdayDate = DateTime.parse(_selectedDate)
         .subtract(const Duration(days: 1))
         .toIso8601String()
         .substring(0, 10);
+
     try {
       final yesterdayComparison = await db.rawQuery('''
         SELECT product_id, COALESCE(remaining_pieces, 0) as remaining_pieces
@@ -64,17 +67,14 @@ class _ComparisonReportScreenState extends State<ComparisonReportScreen> {
       ''', [yesterdayDate]);
       final map = <String, int>{};
       for (var row in yesterdayComparison) {
-        final key = row['product_id']?.toString();
-        if (key != null) {
-          map[key] = (row['remaining_pieces'] as num?)?.toInt() ?? 0;
-        }
+        map[row['product_id'] as String] = (row['remaining_pieces'] as num?)?.toInt() ?? 0;
       }
       _yesterdayRemaining = map;
     } catch (e) {
       _yesterdayRemaining = {};
     }
 
-    // Production today
+    // إنتاج اليوم
     {
       final production = await db.rawQuery('''
         SELECT product_id, COALESCE(SUM(good_pieces), 0) as total
@@ -84,15 +84,12 @@ class _ComparisonReportScreenState extends State<ComparisonReportScreen> {
       ''', [_selectedDate]);
       final map = <String, int>{};
       for (var row in production) {
-        final key = row['product_id']?.toString();
-        if (key != null) {
-          map[key] = (row['total'] as num?)?.toInt() ?? 0;
-        }
+        map[row['product_id'] as String] = (row['total'] as num?)?.toInt() ?? 0;
       }
       _todayProduction = map;
     }
 
-    // showroom out
+    // سحب المعرض
     {
       final showroomOut = await db.rawQuery('''
         SELECT product_id, COALESCE(SUM(ABS(quantity)), 0) as total
@@ -102,15 +99,12 @@ class _ComparisonReportScreenState extends State<ComparisonReportScreen> {
       ''', ['$_selectedDate%']);
       final map = <String, int>{};
       for (var row in showroomOut) {
-        final key = row['product_id']?.toString();
-        if (key != null) {
-          map[key] = (row['total'] as num?)?.toInt() ?? 0;
-        }
+        map[row['product_id'] as String] = (row['total'] as num?)?.toInt() ?? 0;
       }
       _showroomOut = map;
     }
 
-    // distributor out
+    // تحميل الموزعين
     {
       final distributorOut = await db.rawQuery('''
         SELECT product_id, COALESCE(SUM(ABS(quantity)), 0) as total
@@ -120,15 +114,12 @@ class _ComparisonReportScreenState extends State<ComparisonReportScreen> {
       ''', ['$_selectedDate%']);
       final map = <String, int>{};
       for (var row in distributorOut) {
-        final key = row['product_id']?.toString();
-        if (key != null) {
-          map[key] = (row['total'] as num?)?.toInt() ?? 0;
-        }
+        map[row['product_id'] as String] = (row['total'] as num?)?.toInt() ?? 0;
       }
       _distributorOut = map;
     }
 
-    // showroom return
+    // مرتجع المعرض
     {
       final showroomReturn = await db.rawQuery('''
         SELECT product_id, COALESCE(SUM(ABS(quantity)), 0) as total
@@ -138,41 +129,36 @@ class _ComparisonReportScreenState extends State<ComparisonReportScreen> {
       ''', ['$_selectedDate%']);
       final map = <String, int>{};
       for (var row in showroomReturn) {
-        final key = row['product_id']?.toString();
-        if (key != null) {
-          map[key] = (row['total'] as num?)?.toInt() ?? 0;
-        }
+        map[row['product_id'] as String] = (row['total'] as num?)?.toInt() ?? 0;
       }
       _showroomReturn = map;
     }
 
-    // distributor return
+    // مرتجعات الموزعين (كل موزع على حدة)
     {
-      final distributorReturn = await db.rawQuery('''
-        SELECT product_id, COALESCE(SUM(ABS(quantity)), 0) as total
+      final distReturns = await db.rawQuery('''
+        SELECT product_id, distributor_id, COALESCE(SUM(ABS(quantity)), 0) as total
         FROM ${DBConstants.tableStockMovements}
         WHERE movement_type = 'مرتجع' AND reference_type = 'distributor' AND created_at LIKE ?
-        GROUP BY product_id
+        GROUP BY product_id, distributor_id
       ''', ['$_selectedDate%']);
-      final map = <String, int>{};
-      for (var row in distributorReturn) {
-        final key = row['product_id']?.toString();
-        if (key != null) {
-          map[key] = (row['total'] as num?)?.toInt() ?? 0;
-        }
+      final map = <String, Map<String, int>>{};
+      for (var row in distReturns) {
+        final productId = row['product_id'] as String;
+        final distId = row['distributor_id'] as String? ?? 'unknown';
+        final qty = (row['total'] as num?)?.toInt() ?? 0;
+        map[productId] ??= {};
+        map[productId]![distId] = qty;
       }
-      _distributorReturn = map;
+      _distributorReturnsByDistributor = map;
     }
 
-    // current stock
+    // المخزون الحالي
     {
       final currentStock = await db.query(DBConstants.tableStock);
       final map = <String, int>{};
       for (var row in currentStock) {
-        final key = row['product_id']?.toString();
-        if (key != null) {
-          map[key] = (row['quantity_pieces'] as num?)?.toInt() ?? 0;
-        }
+        map[row['product_id'] as String] = (row['quantity_pieces'] as num?)?.toInt() ?? 0;
       }
       _currentStock = map;
     }
@@ -219,7 +205,10 @@ class _ComparisonReportScreenState extends State<ComparisonReportScreen> {
     final showOut = _showroomOut[id] ?? 0;
     final distOut = _distributorOut[id] ?? 0;
     final showReturn = _showroomReturn[id] ?? 0;
-    final distReturn = _distributorReturn[id] ?? 0;
+    int distReturn = 0;
+    _distributorReturnsByDistributor[id]?.forEach((_, qty) {
+      distReturn += qty;
+    });
     final actual = _currentStock[id] ?? 0;
     final available = yesterday + prod + showReturn + distReturn;
     final outgoing = showOut + distOut;
@@ -352,16 +341,7 @@ class _ComparisonReportScreenState extends State<ComparisonReportScreen> {
                         ],
                         rows: _buildOutgoingRows()),
                     const SizedBox(height: 16),
-                    _buildSection('📥 مصادر البضاعة (الواردة)',
-                        columns: const [
-                          'المنتج',
-                          'متبقي أمس',
-                          'إنتاج اليوم',
-                          'مرجوع المعرض',
-                          'مرجوع الموزعين',
-                          'الإجمالي'
-                        ],
-                        rows: _buildIncomingRows()),
+                    _buildIncomingSection(),
                     const SizedBox(height: 16),
                     _buildSection('📊 نتيجة المقارنة',
                         columns: const [
@@ -422,28 +402,56 @@ class _ComparisonReportScreenState extends State<ComparisonReportScreen> {
     }).toList();
   }
 
-  List<DataRow> _buildIncomingRows() {
-    return _getFilteredProducts().map((product) {
-      final id = product['id'] as String;
-      final boxSize = _getBoxSize(id);
-      final yesterday = _yesterdayRemaining[id] ?? 0;
-      final prod = _todayProduction[id] ?? 0;
-      final showReturn = _showroomReturn[id] ?? 0;
-      final distReturn = _distributorReturn[id] ?? 0;
-      final total = yesterday + prod + showReturn + distReturn;
-      return DataRow(
-        cells: [
-          DataCell(Text('${product['name']} ($boxSize)')),
-          DataCell(Text(_piecesToDisplay(yesterday, boxSize))),
-          DataCell(Text(_piecesToDisplay(prod, boxSize))),
-          DataCell(Text(_piecesToDisplay(showReturn, boxSize))),
-          DataCell(Text(_piecesToDisplay(distReturn, boxSize))),
-          DataCell(Text(_piecesToDisplay(total, boxSize),
-              style: const TextStyle(fontWeight: FontWeight.bold))),
-        ],
-        onSelectChanged: (_) => _showProductDetail(product),
-      );
-    }).toList();
+  Widget _buildIncomingSection() {
+    final distributorColumns = _distributors.map((d) => d['name'] ?? '').toList();
+    final allColumns = ['المنتج', 'متبقي أمس', 'إنتاج اليوم', 'مرجوع المعرض', ...distributorColumns, 'الإجمالي'];
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('📥 مصادر البضاعة (الواردة)',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppTheme.primaryColor)),
+            const SizedBox(height: 8),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: DataTable(
+                columnSpacing: 12,
+                columns: allColumns.map((c) => DataColumn(label: Text(c))).toList(),
+                rows: _getFilteredProducts().map((product) {
+                  final id = product['id'] as String;
+                  final boxSize = _getBoxSize(id);
+                  final yesterday = _yesterdayRemaining[id] ?? 0;
+                  final prod = _todayProduction[id] ?? 0;
+                  final showReturn = _showroomReturn[id] ?? 0;
+                  int totalDistReturn = 0;
+                  final cells = <DataCell>[
+                    DataCell(Text('${product['name']} ($boxSize)')),
+                    DataCell(Text(_piecesToDisplay(yesterday, boxSize))),
+                    DataCell(Text(_piecesToDisplay(prod, boxSize))),
+                    DataCell(Text(_piecesToDisplay(showReturn, boxSize))),
+                  ];
+                  for (var dist in _distributors) {
+                    final distId = dist['id'] as String;
+                    final qty = _distributorReturnsByDistributor[id]?[distId] ?? 0;
+                    totalDistReturn += qty;
+                    cells.add(DataCell(Text(_piecesToDisplay(qty, boxSize))));
+                  }
+                  cells.add(DataCell(Text(_piecesToDisplay(yesterday + prod + showReturn + totalDistReturn, boxSize),
+                      style: const TextStyle(fontWeight: FontWeight.bold))));
+                  return DataRow(
+                    cells: cells,
+                    onSelectChanged: (_) => _showProductDetail(product),
+                  );
+                }).toList(),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   List<DataRow> _buildResultRows() {
@@ -455,7 +463,10 @@ class _ComparisonReportScreenState extends State<ComparisonReportScreen> {
       final showOut = _showroomOut[id] ?? 0;
       final distOut = _distributorOut[id] ?? 0;
       final showReturn = _showroomReturn[id] ?? 0;
-      final distReturn = _distributorReturn[id] ?? 0;
+      int distReturn = 0;
+      _distributorReturnsByDistributor[id]?.forEach((_, qty) {
+        distReturn += qty;
+      });
       final actual = _currentStock[id] ?? 0;
       final available = yesterday + prod + showReturn + distReturn;
       final outgoing = showOut + distOut;
@@ -531,9 +542,7 @@ class _ComparisonReportScreenState extends State<ComparisonReportScreen> {
               scrollDirection: Axis.horizontal,
               child: DataTable(
                 columnSpacing: 12,
-                columns: columns
-                    .map((c) => DataColumn(label: Text(c)))
-                    .toList(),
+                columns: columns.map((c) => DataColumn(label: Text(c))).toList(),
                 rows: rows,
               ),
             ),
