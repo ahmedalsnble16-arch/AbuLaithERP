@@ -3,6 +3,7 @@ import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import '../../config/app_config.dart';
 import '../../core/constants/db_constants.dart';
+import '../../core/security/password_hasher.dart';
 
 class DatabaseHelper {
   static DatabaseHelper? _instance;
@@ -177,14 +178,18 @@ class DatabaseHelper {
       )
     ''');
 
+    // تمت إضافة عمود distributor_id
     await db.execute('''
       CREATE TABLE ${DBConstants.tableStockMovements} (
         id TEXT PRIMARY KEY,
         product_id TEXT NOT NULL,
         movement_type TEXT NOT NULL,
         quantity INTEGER NOT NULL,
+        before_qty INTEGER,
+        after_qty INTEGER,
         reference_id TEXT,
         reference_type TEXT,
+        distributor_id TEXT,
         notes TEXT,
         created_at TEXT NOT NULL,
         created_by TEXT,
@@ -526,6 +531,19 @@ class DatabaseHelper {
       )
     ''');
 
+    // جدول أسعار المنتجات للموزعين
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS ${DBConstants.tableDistributorProductPrices} (
+        id TEXT PRIMARY KEY,
+        distributor_id TEXT NOT NULL,
+        product_id TEXT NOT NULL,
+        price REAL NOT NULL,
+        UNIQUE(distributor_id, product_id),
+        FOREIGN KEY (distributor_id) REFERENCES ${DBConstants.tableDistributors}(id),
+        FOREIGN KEY (product_id) REFERENCES ${DBConstants.tableProducts}(id)
+      )
+    ''');
+
     // ============ جداول المعرض الجديدة ============
     await db.execute('''
       CREATE TABLE IF NOT EXISTS showroom_daily_entries (
@@ -577,6 +595,7 @@ class DatabaseHelper {
       )
     ''');
 
+    // تمت إضافة عمود category هنا
     await db.execute('''
       CREATE TABLE IF NOT EXISTS showroom_daily_expenses (
         id TEXT PRIMARY KEY,
@@ -1046,6 +1065,22 @@ class DatabaseHelper {
         'ALTER TABLE showroom_daily_expenses ADD COLUMN category TEXT DEFAULT "expense"'
       );
     }
+    if (oldVersion < 8) {
+      await db.execute(
+        'ALTER TABLE ${DBConstants.tableStockMovements} ADD COLUMN distributor_id TEXT'
+      );
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS ${DBConstants.tableDistributorProductPrices} (
+          id TEXT PRIMARY KEY,
+          distributor_id TEXT NOT NULL,
+          product_id TEXT NOT NULL,
+          price REAL NOT NULL,
+          UNIQUE(distributor_id, product_id),
+          FOREIGN KEY (distributor_id) REFERENCES ${DBConstants.tableDistributors}(id),
+          FOREIGN KEY (product_id) REFERENCES ${DBConstants.tableProducts}(id)
+        )
+      ''');
+    }
   }
 
   Future<void> _seedData(Database db) async {
@@ -1107,11 +1142,12 @@ class DatabaseHelper {
       'updated_at': now,
     });
 
+    // تم تصحيح كلمة المرور إلى هاش
     await db.insert(DBConstants.tableUsers, {
       'id': 'user_admin_001',
       'full_name': 'مدير النظام',
       'username': 'admin',
-      'password_hash': 'admin123',
+      'password_hash': PasswordHasher.hash('admin123'),
       'role_id': 'role_admin',
       'phone': '770000000',
       'active': 1,
