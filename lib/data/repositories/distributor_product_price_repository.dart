@@ -1,16 +1,19 @@
 import 'package:uuid/uuid.dart';
 import 'package:sqflite/sqflite.dart';
+import '../../core/constants/db_constants.dart';
 import '../../core/database/database_helper.dart';
 
 class DistributorProductPriceRepository {
   final DatabaseHelper _dbHelper = DatabaseHelper();
   final Uuid _uuid = const Uuid();
-  static const String tableName = 'distributor_product_prices';
+  
+  // استخدام اسم الجدول الموحد من DBConstants
+  String get tableName => DBConstants.tableDistributorProductPrices;
 
   Future<void> createTableIfNeeded() async {
     final db = await _dbHelper.database;
     await db.execute('''
-      CREATE TABLE IF NOT EXISTS $tableName (
+      CREATE TABLE IF NOT EXISTS "$tableName" (
         id TEXT PRIMARY KEY,
         distributor_id TEXT NOT NULL,
         product_id TEXT NOT NULL,
