@@ -492,8 +492,11 @@ class _DistributorAccountScreenState extends State<DistributorAccountScreen> {
       await _distRepo.settleDistributor(
         distributorId: widget.distributor.id,
         loadId: _currentLoadId!,
-        items: [],
         collectedCash: cash,
+        totalLoadValue: _loadTotalValue,
+        totalReturnedValue: _returnedTotalValue,
+        totalDamagedValue: _damagedTotalValue,
+        commissionPercent: widget.distributor.commissionPercent,
       );
       await _loadInitialData();
       await _loadLoadDetails(_currentLoadId!);
