@@ -1,6 +1,7 @@
 import 'package:uuid/uuid.dart';
 import '../../core/constants/db_constants.dart';
 import '../../core/database/database_helper.dart';
+import '../../core/security/password_hasher.dart';
 import '../models/user.dart';
 
 class UserRepository {
@@ -10,10 +11,14 @@ class UserRepository {
   // تسجيل الدخول
   Future<User?> login(String username, String password) async {
     final db = await _dbHelper.database;
+    
+    // تشفير كلمة المرور المدخلة لمقارنتها بالمخزنة
+    final hashedPassword = PasswordHasher.hash(password);
+    
     final List<Map<String, dynamic>> maps = await db.query(
       DBConstants.tableUsers,
       where: 'username = ? AND password_hash = ? AND active = 1 AND deleted = 0',
-      whereArgs: [username, password],
+      whereArgs: [username, hashedPassword],
     );
 
     if (maps.isEmpty) return null;
@@ -94,10 +99,12 @@ class UserRepository {
   // تغيير كلمة المرور
   Future<void> changePassword(String userId, String newPassword) async {
     final db = await _dbHelper.database;
+    // تشفير كلمة المرور الجديدة قبل الحفظ
+    final hashedPassword = PasswordHasher.hash(newPassword);
     await db.update(
       DBConstants.tableUsers,
       {
-        'password_hash': newPassword,
+        'password_hash': hashedPassword,
         'updated_at': DatabaseHelper.now,
       },
       where: 'id = ?',
