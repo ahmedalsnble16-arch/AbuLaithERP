@@ -21,6 +21,7 @@ class _DistributorSettleScreenState extends State<DistributorSettleScreen> {
   double _collectedCash = 0;
   String? _loadId;
   bool _isLoading = true;
+  double _commissionPercent = 5.0;
 
   @override
   void initState() {
@@ -31,35 +32,70 @@ class _DistributorSettleScreenState extends State<DistributorSettleScreen> {
   Future<void> _load() async {
     final products = await _productRepo.getAll();
     final openLoads = await _distRepo.getOpenLoads(widget.distributorId);
+    
+    // جلب نسبة العمولة من الموزع
+    final distributor = await _distRepo.getById(widget.distributorId);
+    final commission = distributor?.commissionPercent ?? 5.0;
+    
     setState(() {
       _products = products.where((p) => p.active).toList();
       if (openLoads.isNotEmpty) _loadId = openLoads.first.id;
       for (var p in _products) {
         _data[p.id] = {'sold': 0, 'returned': 0, 'damaged': 0};
       }
+      _commissionPercent = commission;
       _isLoading = false;
     });
   }
 
   Future<void> _settle() async {
-    if (_loadId == null) return;
-    final items = _data.entries.map((e) => {
-      'productId': e.key,
-      'sold': e.value['sold'] ?? 0,
-      'returned': e.value['returned'] ?? 0,
-      'damaged': e.value['damaged'] ?? 0,
-      'unitPrice': _products.firstWhere((p) => p.id == e.key).wholesalePrice,
-    }).toList();
+    if (_loadId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('لا توجد حملة مفتوحة للتصفية')),
+      );
+      return;
+    }
 
-    await _distRepo.settleDistributor(
-      distributorId: widget.distributorId,
-      loadId: _loadId!,
-      items: items,
-      collectedCash: _collectedCash,
-    );
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تمت التصفية'), backgroundColor: AppTheme.successColor));
-      Navigator.pop(context);
+    // حساب القيم من البيانات المدخلة
+    double totalLoadValue = 0;
+    double totalReturnedValue = 0;
+    double totalDamagedValue = 0;
+
+    for (var entry in _data.entries) {
+      final productId = entry.key;
+      final sold = entry.value['sold'] ?? 0;
+      final returned = entry.value['returned'] ?? 0;
+      final damaged = entry.value['damaged'] ?? 0;
+      final unitPrice = _products.firstWhere((p) => p.id == productId).wholesalePrice;
+
+      totalLoadValue += sold * unitPrice;
+      totalReturnedValue += returned * unitPrice;
+      // التالف يحسب بسعر أقل (يمكن استخدام سعر التالف من الإعدادات لاحقاً)
+      totalDamagedValue += damaged * (unitPrice * 0.5);
+    }
+
+    try {
+      await _distRepo.settleDistributor(
+        distributorId: widget.distributorId,
+        loadId: _loadId!,
+        collectedCash: _collectedCash,
+        totalLoadValue: totalLoadValue,
+        totalReturnedValue: totalReturnedValue,
+        totalDamagedValue: totalDamagedValue,
+        commissionPercent: _commissionPercent,
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('تمت التصفية'), backgroundColor: AppTheme.successColor),
+        );
+        Navigator.pop(context);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('خطأ أثناء التصفية: $e'), backgroundColor: AppTheme.errorColor),
+        );
+      }
     }
   }
 
