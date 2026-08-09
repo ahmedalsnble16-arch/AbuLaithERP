@@ -32,17 +32,23 @@ class DistributorService {
     );
   }
 
-  Future<String> settleDistributor({
+  Future<void> settleDistributor({
     required String distributorId,
     required String loadId,
-    required List<Map<String, dynamic>> items,
     required double collectedCash,
+    required double totalLoadValue,
+    required double totalReturnedValue,
+    required double totalDamagedValue,
+    required double commissionPercent,
   }) async {
-    return await _repository.settleDistributor(
+    await _repository.settleDistributor(
       distributorId: distributorId,
       loadId: loadId,
-      items: items,
       collectedCash: collectedCash,
+      totalLoadValue: totalLoadValue,
+      totalReturnedValue: totalReturnedValue,
+      totalDamagedValue: totalDamagedValue,
+      commissionPercent: commissionPercent,
     );
   }
 }
