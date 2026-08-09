@@ -15,7 +15,7 @@ class _AllLoadsScreenState extends State<AllLoadsScreen> {
 
   List<Map<String, dynamic>> _products = [];
   List<Map<String, dynamic>> _distributors = [];
-  Map<String, Map<String, int>> _loadData = {};
+  Map<String, Map<String, int>> _loadDataMap = {};
   Map<String, int> _showroomData = {};
 
   DateTime _fromDate = DateTime.now().subtract(const Duration(days: 30));
@@ -25,7 +25,6 @@ class _AllLoadsScreenState extends State<AllLoadsScreen> {
   String _searchQuery = '';
   bool _isLoading = true;
 
-  // حالة الترتيب
   String? _sortColumn;
   bool _sortAscending = true;
 
@@ -49,7 +48,6 @@ class _AllLoadsScreenState extends State<AllLoadsScreen> {
       final fromStr = _fromDate.toIso8601String().substring(0, 10);
       final toStr = _toDate.toIso8601String().substring(0, 10);
 
-      // تحميلات الموزعين
       final distLoads = await db.rawQuery('''
         SELECT dli.product_id, dl.distributor_id, SUM(dli.quantity) as total
         FROM ${DBConstants.tableDistributorLoadItems} dli
@@ -58,16 +56,15 @@ class _AllLoadsScreenState extends State<AllLoadsScreen> {
         GROUP BY dli.product_id, dl.distributor_id
       ''', [fromStr, toStr]);
 
-      _loadData.clear();
+      _loadDataMap.clear();
       for (var row in distLoads) {
         final pId = row['product_id'] as String;
         final dId = row['distributor_id'] as String;
         final qty = (row['total'] as num?)?.toInt() ?? 0;
-        _loadData[pId] ??= {};
-        _loadData[pId]![dId] = qty;
+        _loadDataMap[pId] ??= {};
+        _loadDataMap[pId]![dId] = qty;
       }
 
-      // تحميلات المعرض
       final showroomLoads = await db.rawQuery('''
         SELECT product_id, SUM(load_total_pieces) as total
         FROM ${DBConstants.tableShowroomDailyEntries}
@@ -87,7 +84,7 @@ class _AllLoadsScreenState extends State<AllLoadsScreen> {
   }
 
   int _getDistributorLoad(String productId, String distributorId) {
-    return _loadData[productId]?[distributorId] ?? 0;
+    return _loadDataMap[productId]?[distributorId] ?? 0;
   }
 
   int _getShowroomLoad(String productId) {
@@ -115,13 +112,11 @@ class _AllLoadsScreenState extends State<AllLoadsScreen> {
     return p['pieces_per_box'] as int? ?? 60;
   }
 
-  /// نافذة تفاصيل التحميل (بدون تعديل)
   Future<void> _showLoadDetails(String productId, String distributorId) async {
     final db = await _dbHelper.database;
     final fromStr = _fromDate.toIso8601String().substring(0, 10);
     final toStr = _toDate.toIso8601String().substring(0, 10);
 
-    // جلب التفاصيل الفردية من بنود التحميل
     final details = await db.rawQuery('''
       SELECT dli.quantity, dl.load_date, dl.created_at
       FROM ${DBConstants.tableDistributorLoadItems} dli
@@ -171,7 +166,6 @@ class _AllLoadsScreenState extends State<AllLoadsScreen> {
     );
   }
 
-  /// نافذة تفاصيل تحميل المعرض
   Future<void> _showShowroomDetails(String productId) async {
     final db = await _dbHelper.database;
     final fromStr = _fromDate.toIso8601String().substring(0, 10);
@@ -188,7 +182,6 @@ class _AllLoadsScreenState extends State<AllLoadsScreen> {
 
     final productName = _products.firstWhere((e) => e['id'] == productId,
         orElse: () => {'name': ''})['name'] ?? '';
-    final boxSize = _getBoxSize(productId);
 
     showDialog(
       context: context,
@@ -285,7 +278,6 @@ class _AllLoadsScreenState extends State<AllLoadsScreen> {
       color: Theme.of(context).primaryColor.withAlpha(10),
       child: Column(
         children: [
-          // أزرار سريعة للتاريخ
           Row(
             children: [
               _quickDateButton('اليوم', DateTime.now(), DateTime.now()),
@@ -374,11 +366,9 @@ class _AllLoadsScreenState extends State<AllLoadsScreen> {
     final filteredProducts = _filteredProducts;
     final filteredDistributors = _filteredDistributors;
 
-    // حساب إجماليات الأعمدة
     final Map<String, int> columnTotals = {};
     int grandTotal = 0;
 
-    // --- الفرز ---
     if (_sortColumn != null) {
       switch (_sortColumn) {
         case 'name':
@@ -391,13 +381,11 @@ class _AllLoadsScreenState extends State<AllLoadsScreen> {
           _sort(filteredProducts, 'total', _sortAscending, (p) => _getRowTotal(p['id']));
           break;
         default:
-          // فرز حسب عمود موزع معين
           final distId = _sortColumn;
           _sort(filteredProducts, distId!, _sortAscending, (p) => _getDistributorLoad(p['id'], distId));
       }
     }
 
-    // بناء الصفوف
     final List<DataRow> rows = [];
     for (var product in filteredProducts) {
       final productId = product['id'] as String;
@@ -431,7 +419,6 @@ class _AllLoadsScreenState extends State<AllLoadsScreen> {
       rows.add(DataRow(cells: cells));
     }
 
-    // صف الإجمالي
     if (filteredProducts.isNotEmpty) {
       final firstProductId = filteredProducts.first['id'] as String;
       final totalCells = <DataCell>[
@@ -457,7 +444,6 @@ class _AllLoadsScreenState extends State<AllLoadsScreen> {
       ));
     }
 
-    // الأعمدة مع إمكانية الفرز
     final columns = <DataColumn>[
       DataColumn(
         label: const Text('المنتج'),
@@ -504,7 +490,8 @@ class _AllLoadsScreenState extends State<AllLoadsScreen> {
         rows: rows,
         columnSpacing: 12,
         headingRowHeight: 40,
-        dataRowHeight: 40,
+        dataRowMinHeight: 40,
+        dataRowMaxHeight: 40,
         showBottomBorder: true,
       ),
     );
