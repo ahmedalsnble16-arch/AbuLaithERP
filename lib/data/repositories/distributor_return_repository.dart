@@ -16,15 +16,18 @@ class DistributorReturnRepository {
     String? deviceId,
     DatabaseExecutor? externalTxn,
   }) async {
-    final db = externalTxn ?? await _dbHelper.database;
     final now = DatabaseHelper.now;
     final user = createdBy ?? 'admin';
     final device = deviceId ?? 'mobile';
 
     String distributorName = '';
     try {
-      final distRes = await db.query(DBConstants.tableDistributors,
-          columns: ['name'], where: 'id = ?', whereArgs: [distributorId]);
+      final distRes = await _dbHelper.database.query(
+        DBConstants.tableDistributors,
+        columns: ['name'],
+        where: 'id = ?',
+        whereArgs: [distributorId],
+      );
       if (distRes.isNotEmpty) {
         distributorName = distRes.first['name'] as String? ?? '';
       }
@@ -58,7 +61,6 @@ class DistributorReturnRepository {
             'sync_status': 'Pending',
           });
 
-          // إعادة الكمية إلى مخزن الإنتاج
           final stockList = await txn.query(DBConstants.tableStock,
               where: 'product_id = ?', whereArgs: [productId]);
           int beforeQty = 0;
@@ -81,7 +83,6 @@ class DistributorReturnRepository {
             });
           }
 
-          // تسجيل حركة مخزون متوافقة مع كشف المقارنة
           await txn.insert(DBConstants.tableStockMovements, {
             'id': _uuid.v4(),
             'product_id': productId,
@@ -105,6 +106,7 @@ class DistributorReturnRepository {
     if (externalTxn != null) {
       await execute(externalTxn);
     } else {
+      final db = await _dbHelper.database;
       await db.transaction((txn) => execute(txn));
     }
   }
