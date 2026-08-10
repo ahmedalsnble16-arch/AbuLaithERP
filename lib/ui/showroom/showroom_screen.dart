@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 import '../../config/theme.dart';
+import '../../core/database/database_helper.dart';
 import '../../data/models/product.dart';
 import '../../data/models/worker.dart';
 import '../../data/repositories/product_repository.dart';
@@ -153,7 +154,7 @@ class _ShowroomScreenState extends State<ShowroomScreen>
 
       // جلب مدور الأمس من daily_remaining
       _yesterdayRemaining.clear();
-      final db = await _showroomRepo._dbHelper.database;
+      final db = await DatabaseHelper().database;
       for (var p in _products) {
         final remainingMaps = await db.query(
           'daily_remaining',
@@ -413,7 +414,7 @@ class _ShowroomScreenState extends State<ShowroomScreen>
         deviceId: 'mobile',
       );
 
-      final db = await _showroomRepo._dbHelper.database;
+      final db = await DatabaseHelper().database;
       final now = DateTime.now().toIso8601String();
       for (var p in _products) {
         final boxes = int.tryParse(_remainingBoxesCtrl[p.id]?.text ?? '0') ?? 0;
@@ -494,7 +495,7 @@ class _ShowroomScreenState extends State<ShowroomScreen>
       final list = _expenseRows.map((row) => {'id': row.id, 'amount': double.tryParse(row.amountCtrl.text) ?? 0, 'details': row.detailsCtrl.text}).toList();
       await _showroomRepo.saveDailyExpenses(businessDate: _businessDate, expenses: list, createdBy: 'admin', deviceId: 'mobile');
 
-      final db = await _showroomRepo._dbHelper.database;
+      final db = await DatabaseHelper().database;
       for (var row in _expenseRows) {
         final amount = double.tryParse(row.amountCtrl.text) ?? 0;
         if (amount > 0) {
@@ -534,7 +535,7 @@ class _ShowroomScreenState extends State<ShowroomScreen>
       final list = _smallLedgerRows.map((row) => {'id': row.id, 'amount': double.tryParse(row.amountCtrl.text) ?? 0, 'details': row.detailsCtrl.text}).toList();
       await _showroomRepo.saveSmallLedger(businessDate: _businessDate, entries: list, createdBy: 'admin', deviceId: 'mobile');
 
-      final db = await _showroomRepo._dbHelper.database;
+      final db = await DatabaseHelper().database;
       for (var row in _smallLedgerRows) {
         final amount = double.tryParse(row.amountCtrl.text) ?? 0;
         if (amount > 0) {
@@ -574,7 +575,7 @@ class _ShowroomScreenState extends State<ShowroomScreen>
       final list = _khatRows.map((row) => {'id': row.id, 'worker_name': row.workerNameCtrl.text, 'amount': double.tryParse(row.amountCtrl.text) ?? 0}).toList();
       await _showroomRepo.saveKhat(businessDate: _businessDate, entries: list, createdBy: 'admin', deviceId: 'mobile');
 
-      final db = await _showroomRepo._dbHelper.database;
+      final db = await DatabaseHelper().database;
       for (var row in _khatRows) {
         final amount = double.tryParse(row.amountCtrl.text) ?? 0;
         if (amount > 0) {
@@ -642,7 +643,7 @@ class _ShowroomScreenState extends State<ShowroomScreen>
 
     await _showroomRepo.saveDailyAccount(
       businessDate: _businessDate,
-      previousRemainingValue: actualRemainingValue, // <-- استخدام القيمة الفعلية للمدور
+      previousRemainingValue: actualRemainingValue,
       totalLoadValue: _totalLoadValue,
       totalReturnValue: _totalReturnValue,
       netGoodsValue: goodsNet,
@@ -798,7 +799,7 @@ class _ShowroomScreenState extends State<ShowroomScreen>
             ),
           ),
           const SizedBox(height: 12),
-          // ***** قسم المدور عليه - إدخال مباشر *****
+          // قسم المدور عليه - إدخال مباشر
           Card(
             child: Padding(
               padding: const EdgeInsets.all(12),
