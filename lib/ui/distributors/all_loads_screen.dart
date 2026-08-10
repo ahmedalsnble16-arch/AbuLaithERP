@@ -15,7 +15,7 @@ class _AllLoadsScreenState extends State<AllLoadsScreen> {
 
   List<Map<String, dynamic>> _products = [];
   List<Map<String, dynamic>> _distributors = [];
-  Map<String, Map<String, int>> _loadDataMap = {};
+  Map<String, Map<String, int>> _loadData = {};
   Map<String, int> _showroomData = {};
 
   DateTime _fromDate = DateTime.now().subtract(const Duration(days: 30));
@@ -48,6 +48,7 @@ class _AllLoadsScreenState extends State<AllLoadsScreen> {
       final fromStr = _fromDate.toIso8601String().substring(0, 10);
       final toStr = _toDate.toIso8601String().substring(0, 10);
 
+      // تحميلات الموزعين (مع distributor_id للتفصيل)
       final distLoads = await db.rawQuery('''
         SELECT dli.product_id, dl.distributor_id, SUM(dli.quantity) as total
         FROM ${DBConstants.tableDistributorLoadItems} dli
@@ -56,15 +57,16 @@ class _AllLoadsScreenState extends State<AllLoadsScreen> {
         GROUP BY dli.product_id, dl.distributor_id
       ''', [fromStr, toStr]);
 
-      _loadDataMap.clear();
+      _loadData.clear();
       for (var row in distLoads) {
         final pId = row['product_id'] as String;
         final dId = row['distributor_id'] as String;
         final qty = (row['total'] as num?)?.toInt() ?? 0;
-        _loadDataMap[pId] ??= {};
-        _loadDataMap[pId]![dId] = qty;
+        _loadData[pId] ??= {};
+        _loadData[pId]![dId] = qty;
       }
 
+      // تحميلات المعرض
       final showroomLoads = await db.rawQuery('''
         SELECT product_id, SUM(load_total_pieces) as total
         FROM ${DBConstants.tableShowroomDailyEntries}
@@ -84,7 +86,7 @@ class _AllLoadsScreenState extends State<AllLoadsScreen> {
   }
 
   int _getDistributorLoad(String productId, String distributorId) {
-    return _loadDataMap[productId]?[distributorId] ?? 0;
+    return _loadData[productId]?[distributorId] ?? 0;
   }
 
   int _getShowroomLoad(String productId) {
@@ -144,7 +146,7 @@ class _AllLoadsScreenState extends State<AllLoadsScreen> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('الفترة: $_fromDate - $_toDate'),
+              Text('الفترة: $fromStr - $toStr'),
               const Divider(),
               if (details.isEmpty)
                 const Text('لا توجد حركات تحميل في هذه الفترة')
@@ -193,7 +195,7 @@ class _AllLoadsScreenState extends State<AllLoadsScreen> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('الفترة: $_fromDate - $_toDate'),
+              Text('الفترة: $fromStr - $toStr'),
               const Divider(),
               if (details.isEmpty)
                 const Text('لا توجد تحميلات للمعرض في هذه الفترة')
