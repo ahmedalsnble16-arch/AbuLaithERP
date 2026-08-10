@@ -21,7 +21,6 @@ class DistributorReturnRepository {
     final user = createdBy ?? 'admin';
     final device = deviceId ?? 'mobile';
 
-    // جلب اسم الموزع (للاستخدام في السجلات)
     String distributorName = '';
     try {
       final distRes = await db.query(DBConstants.tableDistributors,
@@ -31,7 +30,6 @@ class DistributorReturnRepository {
       }
     } catch (_) {}
 
-    // دالة التنفيذ الداخلي
     Future<void> execute(DatabaseExecutor txn) async {
       for (var item in returnItems) {
         final productId = item['productId'] as String;
@@ -43,7 +41,6 @@ class DistributorReturnRepository {
         final totalValue = totalPieces * unitPrice;
 
         if (totalPieces > 0) {
-          // 1. إدراج سجل المرتجع في جدول distributor_load_returns
           await txn.insert(DBConstants.tableDistributorLoadReturns, {
             'id': _uuid.v4(),
             'distributor_id': distributorId,
@@ -61,7 +58,7 @@ class DistributorReturnRepository {
             'sync_status': 'Pending',
           });
 
-          // 2. إعادة الكمية إلى مخزون الإنتاج (tableStock)
+          // إعادة الكمية إلى مخزن الإنتاج
           final stockList = await txn.query(DBConstants.tableStock,
               where: 'product_id = ?', whereArgs: [productId]);
           int beforeQty = 0;
@@ -84,18 +81,18 @@ class DistributorReturnRepository {
             });
           }
 
-          // 3. تسجيل حركة مخزون متوافقة مع كشف المقارنة (عمود مرجوع الموزعين الفرعي)
+          // تسجيل حركة مخزون متوافقة مع كشف المقارنة
           await txn.insert(DBConstants.tableStockMovements, {
             'id': _uuid.v4(),
             'product_id': productId,
-            'movement_type': 'مرتجع',          // مفتاح الربط مع ComparisonReportScreen
-            'quantity': totalPieces,           // موجب = إضافة للمخزون
+            'movement_type': 'مرتجع',
+            'quantity': totalPieces,
             'before_qty': beforeQty,
             'after_qty': beforeQty + totalPieces,
-            'reference_id': loadId ?? distributorId, // يُستخدم للتمييز
-            'reference_type': 'distributor',   // النوع الخاص بالموزعين
-            'distributor_id': distributorId,   // عمود جديد نضيفه لمزيد من التفصيل
-            'notes': 'مرتجع من الموزع: $distributorName بتاريخ ${DateTime.now().toIso8601String().substring(0, 10)}',
+            'reference_id': loadId ?? distributorId,
+            'reference_type': 'distributor',
+            'distributor_id': distributorId,
+            'notes': 'مرتجع من الموزع: $distributorName',
             'created_at': now,
             'created_by': user,
             'device_id': device,
@@ -112,7 +109,6 @@ class DistributorReturnRepository {
     }
   }
 
-  // باقي الدوال كما هي...
   Future<List<DistributorLoadReturn>> getReturnsForLoad(String loadId) async {
     final db = await _dbHelper.database;
     final maps = await db.query(
