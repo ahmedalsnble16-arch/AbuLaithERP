@@ -4,6 +4,7 @@ import '../../data/models/product.dart';
 import '../../data/models/distributor.dart';
 import '../../data/repositories/product_repository.dart';
 import '../../data/repositories/distributor_repository.dart';
+import '../../data/repositories/distributor_product_price_repository.dart';
 
 class DistributorLoadScreen extends StatefulWidget {
   final String distributorId;
@@ -21,15 +22,13 @@ class DistributorLoadScreen extends StatefulWidget {
 class _DistributorLoadScreenState extends State<DistributorLoadScreen> {
   final ProductRepository _productRepo = ProductRepository();
   final DistributorRepository _distRepo = DistributorRepository();
+  final DistributorProductPriceRepository _priceRepo = DistributorProductPriceRepository();
   
   List<Product> _products = [];
-  List<Distributor> _distributors = [];
-  String? _selectedDistributorId;
-  String? _selectedDistributorName;
+  Map<String, double> _prices = {};
   
-  // نظام السلال والقطع
-  Map<String, TextEditingController> _boxesControllers = {};
-  Map<String, TextEditingController> _piecesControllers = {};
+  final Map<String, TextEditingController> _boxesControllers = {};
+  final Map<String, TextEditingController> _piecesControllers = {};
   
   bool _isLoading = true;
 
@@ -40,74 +39,72 @@ class _DistributorLoadScreenState extends State<DistributorLoadScreen> {
   }
 
   Future<void> _loadData() async {
-    final products = await _productRepo.getAll();
-    final distributors = await _distRepo.getAll();
-    
-    setState(() {
-      _products = products.where((p) => p.active).toList();
-      _distributors = distributors;
+    setState(() => _isLoading = true);
+    try {
+      final products = await _productRepo.getAll();
+      final prices = await _priceRepo.getPricesForDistributor(widget.distributorId);
       
-      if (widget.distributorId.isNotEmpty) {
-        _selectedDistributorId = widget.distributorId;
-        _selectedDistributorName = widget.distributorName;
-      }
-      
-      for (var p in _products) {
-        _boxesControllers[p.id] = TextEditingController(text: '0');
-        _piecesControllers[p.id] = TextEditingController(text: '0');
-      }
-      _isLoading = false;
-    });
+      setState(() {
+        _products = products.where((p) => p.active).toList();
+        _prices = prices;
+        
+        for (var p in _products) {
+          _boxesControllers[p.id] = TextEditingController(text: '0');
+          _piecesControllers[p.id] = TextEditingController(text: '0');
+        }
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() => _isLoading = false);
+    }
   }
 
-  int _totalPieces(String productId) {
-    final product = _products.firstWhere((p) => p.id == productId);
+  int _parsePieces(String productId) {
+    final p = _products.firstWhere((x) => x.id == productId);
     final boxes = int.tryParse(_boxesControllers[productId]?.text ?? '0') ?? 0;
     final pieces = int.tryParse(_piecesControllers[productId]?.text ?? '0') ?? 0;
-    return (boxes * product.piecesPerBox) + pieces;
+    return (boxes * p.piecesPerBox) + pieces;
   }
 
-  String _formatDisplay(String productId) {
-    final product = _products.firstWhere((p) => p.id == productId);
-    final total = _totalPieces(productId);
-    final boxes = total ~/ product.piecesPerBox;
-    final remaining = total % product.piecesPerBox;
-    return '$boxes.$remaining';
-  }
+  double _getPrice(String productId) =>
+      _prices[productId] ?? _products.firstWhere((x) => x.id == productId).wholesalePrice;
 
   Future<void> _saveLoad() async {
-    if (_selectedDistributorId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('اختر موزعاً'), backgroundColor: AppTheme.warningColor),
-      );
-      return;
+    final items = <Map<String, dynamic>>[];
+    for (var p in _products) {
+      final qty = _parsePieces(p.id);
+      if (qty > 0) {
+        items.add({
+          'productId': p.id,
+          'quantity': qty,
+          'unitPrice': _getPrice(p.id),
+        });
+      }
     }
-
-    final items = _products
-        .where((p) => _totalPieces(p.id) > 0)
-        .map((p) => {
-              'productId': p.id,
-              'quantity': _totalPieces(p.id),
-            })
-        .toList();
 
     if (items.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('أضف كميات'), backgroundColor: AppTheme.warningColor),
-      );
+      _showMsg('أدخل كميات للتحميل أولاً');
       return;
     }
 
-    await _distRepo.createLoad(
-      distributorId: _selectedDistributorId!,
-      items: items,
-    );
-    
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('تم التحميل'), backgroundColor: AppTheme.successColor),
+    try {
+      await _distRepo.createLoad(
+        distributorId: widget.distributorId,
+        items: items,
       );
+      _showMsg('تم حفظ التحميل بنجاح', success: true);
       Navigator.pop(context);
+    } catch (e) {
+      _showMsg('خطأ أثناء الحفظ: $e', success: false);
+    }
+  }
+
+  void _showMsg(String msg, {bool success = true}) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(msg),
+        backgroundColor: success ? AppTheme.successColor : AppTheme.errorColor,
+      ));
     }
   }
 
@@ -121,52 +118,32 @@ class _DistributorLoadScreenState extends State<DistributorLoadScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('تحميل: ${_selectedDistributorName ?? widget.distributorName}')),
+      appBar: AppBar(title: Text('تحميل: ${widget.distributorName}')),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : Column(
               children: [
-                // اختيار الموزع (إذا لم يتم التحديد مسبقاً)
-                if (widget.distributorId.isEmpty)
-                  Padding(
-                    padding: const EdgeInsets.all(8.0),
-                    child: DropdownButtonFormField<String>(
-                      value: _selectedDistributorId,
-                      decoration: const InputDecoration(labelText: 'اختر الموزع'),
-                      items: _distributors
-                          .map((d) => DropdownMenuItem<String>(value: d.id, child: Text(d.name)))
-                          .toList(),
-                      onChanged: (val) {
-                        final dist = _distributors.firstWhere((d) => d.id == val);
-                        setState(() {
-                          _selectedDistributorId = dist.id;
-                          _selectedDistributorName = dist.name;
-                        });
-                      },
-                    ),
-                  ),
-                // جدول المنتجات مع السلال والقطع
                 Expanded(
                   child: ListView.builder(
                     itemCount: _products.length,
                     itemBuilder: (context, index) {
                       final product = _products[index];
-                      final total = _totalPieces(product.id);
+                      final total = _parsePieces(product.id);
+                      final value = total * _getPrice(product.id);
                       return Card(
                         child: Padding(
                           padding: const EdgeInsets.all(8.0),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(product.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-                              Text('السلة: ${product.piecesPerBox} قطعة | السعر: ${product.wholesalePrice} ر.ي'),
-                              const SizedBox(height: 6),
+                              Text(product.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                              Text('السلة: ${product.piecesPerBox} قطعة | السعر: ${_getPrice(product.id)} ر.ي'),
                               Row(
                                 children: [
                                   Expanded(
                                     child: TextField(
                                       controller: _boxesControllers[product.id],
-                                      decoration: const InputDecoration(labelText: 'عدد السلال'),
+                                      decoration: const InputDecoration(labelText: 'سلال'),
                                       keyboardType: TextInputType.number,
                                       onChanged: (_) => setState(() {}),
                                     ),
@@ -183,14 +160,8 @@ class _DistributorLoadScreenState extends State<DistributorLoadScreen> {
                                 ],
                               ),
                               const SizedBox(height: 4),
-                              Text(
-                                'الكمية: ${_formatDisplay(product.id)} ($total قطعة)',
-                                style: const TextStyle(fontWeight: FontWeight.bold),
-                              ),
-                              Text(
-                                'قيمة التحميل: ${(total * product.wholesalePrice).toStringAsFixed(0)} ر.ي',
-                                style: const TextStyle(color: AppTheme.primaryColor),
-                              ),
+                              Text('قيمة التحميل: ${value.toStringAsFixed(0)} ر.ي',
+                                  style: const TextStyle(fontWeight: FontWeight.bold, color: AppTheme.primaryColor)),
                             ],
                           ),
                         ),
@@ -198,13 +169,13 @@ class _DistributorLoadScreenState extends State<DistributorLoadScreen> {
                     },
                   ),
                 ),
-                // زر الحفظ
                 Padding(
-                  padding: const EdgeInsets.all(8.0),
+                  padding: const EdgeInsets.all(16),
                   child: ElevatedButton.icon(
                     onPressed: _saveLoad,
                     icon: const Icon(Icons.save),
                     label: const Text('حفظ التحميل'),
+                    style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(45)),
                   ),
                 ),
               ],
