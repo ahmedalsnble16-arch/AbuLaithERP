@@ -41,7 +41,6 @@ class _DistributorLoadDetailScreenState extends State<DistributorLoadDetailScree
   double _totalReturnedValue = 0;
   final Map<String, int> _returnBoxes = {};
   final Map<String, int> _returnPieces = {};
-  // لتخزين الكميات القديمة للمرتجعات قبل التعديل
   final Map<String, int> _oldReturnPieces = {};
 
   double _totalDamagedValue = 0;
@@ -68,8 +67,8 @@ class _DistributorLoadDetailScreenState extends State<DistributorLoadDetailScree
       final loadData = await db.query(DBConstants.tableDistributorLoads,
           where: 'id = ?', whereArgs: [widget.loadId]);
       if (loadData.isNotEmpty) {
-        _loadDate = loadData.first['load_date'];
-        _loadStatus = loadData.first['status'];
+        _loadDate = loadData.first['load_date']?.toString();
+        _loadStatus = loadData.first['status']?.toString();
       }
 
       for (var p in _products) {
@@ -86,7 +85,6 @@ class _DistributorLoadDetailScreenState extends State<DistributorLoadDetailScree
         _piecesCtrl[pid]?.text = (qty % p.piecesPerBox).toString();
       }
 
-      // جلب المرتجعات الحالية
       final returns = await db.query(DBConstants.tableDistributorLoadReturns,
           where: 'load_id = ?', whereArgs: [widget.loadId]);
       for (var r in returns) {
@@ -95,11 +93,10 @@ class _DistributorLoadDetailScreenState extends State<DistributorLoadDetailScree
         _returnPieces[pid] = r['pieces'] as int? ?? 0;
         final p = _products.firstWhere((x) => x.id == pid);
         final totalPieces = (_returnBoxes[pid]! * p.piecesPerBox) + _returnPieces[pid]!;
-        _oldReturnPieces[pid] = totalPieces; // حفظ الكميات القديمة
+        _oldReturnPieces[pid] = totalPieces;
         _totalReturnedValue += totalPieces * (_prices[pid] ?? p.wholesalePrice);
       }
 
-      // جلب التالف
       final damages = await db.query(DBConstants.tableDistributorLoadDamage,
           where: 'load_id = ?', whereArgs: [widget.loadId]);
       for (var d in damages) {
@@ -156,7 +153,6 @@ class _DistributorLoadDetailScreenState extends State<DistributorLoadDetailScree
     _showMsg('تم حفظ التحميل', success: true);
   }
 
-  // ========== المرتجعات (مع إصلاح تكرار المخزون) ==========
   Future<void> _openReturnsDialog() async {
     final tempBoxes = Map<String, int>.from(_returnBoxes);
     final tempPieces = Map<String, int>.from(_returnPieces);
@@ -251,7 +247,6 @@ class _DistributorLoadDetailScreenState extends State<DistributorLoadDetailScree
     final db = await DatabaseHelper().database;
     final now = DatabaseHelper.now;
 
-    // خصم الكميات القديمة من المخزون أولاً
     for (var entry in _oldReturnPieces.entries) {
       if (entry.value > 0) {
         final stockList = await db.query(DBConstants.tableStock,
@@ -266,11 +261,9 @@ class _DistributorLoadDetailScreenState extends State<DistributorLoadDetailScree
       }
     }
 
-    // حذف المرتجعات القديمة
     await db.delete(DBConstants.tableDistributorLoadReturns,
         where: 'load_id = ?', whereArgs: [widget.loadId]);
 
-    // إضافة المرتجعات الجديدة (مع استدعاء recordReturn الذي يضيف للمخزون)
     final items = <Map<String, dynamic>>[];
     for (var p in _products) {
       final boxes = _returnBoxes[p.id] ?? 0;
@@ -285,7 +278,6 @@ class _DistributorLoadDetailScreenState extends State<DistributorLoadDetailScree
           'unitPrice': _getPrice(p.id),
         });
       }
-      // تحديث oldReturnPieces للقيم الجديدة
       _oldReturnPieces[p.id] = totalPieces;
     }
     if (items.isNotEmpty) {
@@ -297,7 +289,6 @@ class _DistributorLoadDetailScreenState extends State<DistributorLoadDetailScree
     }
   }
 
-  // ========== التالف ==========
   Future<void> _openDamageDialog() async {
     final prices = await _damageRepo.getDamagePrices(widget.distributor.id);
     final smallPrice = prices['صغير'] ?? 0;
@@ -384,7 +375,6 @@ class _DistributorLoadDetailScreenState extends State<DistributorLoadDetailScree
     }
   }
 
-  // ========== التسوية (مع الرصيد السابق والخزنة) ==========
   Future<void> _settleLoad() async {
     final cash = double.tryParse(_cashCtrl.text) ?? 0;
     try {
@@ -427,7 +417,6 @@ class _DistributorLoadDetailScreenState extends State<DistributorLoadDetailScree
 
   @override
   Widget build(BuildContext context) {
-    // الرصيد السابق للموزع (الذي سيتم ترحيله)
     final previousBalance = widget.distributor.currentBalance;
     final commissionPercent = widget.distributor.commissionPercent;
     final netAfterExpenses = _totalLoadValue
@@ -435,7 +424,6 @@ class _DistributorLoadDetailScreenState extends State<DistributorLoadDetailScree
         - _totalReturnedValue
         - _totalDamagedValue
         - (double.tryParse(_cashCtrl.text) ?? 0);
-    // الرصيد النهائي = الرصيد السابق + صافي الحملة الحالية
     final finalBalance = previousBalance + netAfterExpenses;
 
     return Scaffold(
@@ -447,7 +435,6 @@ class _DistributorLoadDetailScreenState extends State<DistributorLoadDetailScree
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // بطاقة الحملة
                   Card(
                     child: Padding(
                       padding: const EdgeInsets.all(12),
@@ -469,7 +456,6 @@ class _DistributorLoadDetailScreenState extends State<DistributorLoadDetailScree
                   ),
                   const SizedBox(height: 12),
 
-                  // التحميل
                   const Text('🚚 التحميل', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                   ..._products.map((p) {
                     final boxes = int.tryParse(_boxesCtrl[p.id]?.text ?? '') ?? 0;
@@ -514,7 +500,6 @@ class _DistributorLoadDetailScreenState extends State<DistributorLoadDetailScree
                   ),
                   const SizedBox(height: 16),
 
-                  // المرتجعات
                   Card(
                     color: Colors.orange.shade50,
                     child: Padding(
@@ -538,7 +523,6 @@ class _DistributorLoadDetailScreenState extends State<DistributorLoadDetailScree
                   ),
                   const SizedBox(height: 12),
 
-                  // التالف
                   Card(
                     color: Colors.red.shade50,
                     child: Padding(
@@ -566,7 +550,6 @@ class _DistributorLoadDetailScreenState extends State<DistributorLoadDetailScree
                   ),
                   const SizedBox(height: 16),
 
-                  // الحساب الختامي مع الرصيد السابق
                   Card(
                     color: Colors.grey.shade100,
                     child: Padding(
@@ -590,7 +573,6 @@ class _DistributorLoadDetailScreenState extends State<DistributorLoadDetailScree
                   ),
                   const SizedBox(height: 16),
 
-                  // النقد والتصفية
                   Card(
                     child: Padding(
                       padding: const EdgeInsets.all(12),
