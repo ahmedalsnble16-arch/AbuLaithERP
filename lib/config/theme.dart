@@ -2,17 +2,18 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 class AppTheme {
-  static const Color primaryColor = Color(0xFF1A237E);
-  static const Color primaryLightColor = Color(0xFF534BAE);
-  static const Color accentColor = Color(0xFF2196F3);
-  static const Color successColor = Color(0xFF4CAF50);
-  static const Color warningColor = Color(0xFFFF9800);
-  static const Color errorColor = Color(0xFFF44336);
-  static const Color backgroundColor = Color(0xFFF5F5F5);
-  static const Color surfaceColor = Colors.white;
-  static const Color textPrimaryColor = Color(0xFF212121);
-  static const Color textSecondaryColor = Color(0xFF757575);
-  static const Color dividerColor = Color(0xFFBDBDBD);
+  // لوحة الألوان الجديدة (محتفظة بجميع أسماء المتغيرات القديمة)
+  static const Color primaryColor = Color(0xFF1E3A8A);        // أزرق ملكي
+  static const Color primaryLightColor = Color(0xFF3B82F6);    // أزرق فاتح
+  static const Color accentColor = Color(0xFF0D9488);          // تيل/تركواز
+  static const Color successColor = Color(0xFF16A34A);         // أخضر
+  static const Color warningColor = Color(0xFFD97706);         // برتقالي
+  static const Color errorColor = Color(0xFFDC2626);           // أحمر
+  static const Color backgroundColor = Color(0xFFF8FAFC);      // خلفية رمادية هادئة
+  static const Color surfaceColor = Colors.white;              // أبيض
+  static const Color textPrimaryColor = Color(0xFF0F172A);     // كحلي داكن
+  static const Color textSecondaryColor = Color(0xFF64748B);   // رمادي
+  static const Color dividerColor = Color(0xFFCBD5E1);         // رمادي فاتح للفواصل
 
   static ThemeData get lightTheme {
     return ThemeData(
@@ -29,6 +30,8 @@ class AppTheme {
         onError: Colors.white,
       ),
       scaffoldBackgroundColor: backgroundColor,
+
+      // شريط العنوان
       appBarTheme: const AppBarTheme(
         backgroundColor: primaryColor,
         foregroundColor: Colors.white,
@@ -42,12 +45,16 @@ class AppTheme {
           color: Colors.white,
         ),
       ),
+
+      // البطاقات
       cardTheme: CardTheme(
         color: surfaceColor,
         elevation: 2,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         margin: const EdgeInsets.all(8),
       ),
+
+      // الأزرار
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
           backgroundColor: primaryColor,
@@ -57,6 +64,8 @@ class AppTheme {
           textStyle: const TextStyle(fontFamily: 'Cairo', fontSize: 16, fontWeight: FontWeight.bold),
         ),
       ),
+
+      // حقول الإدخال
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: Colors.white,
@@ -67,6 +76,8 @@ class AppTheme {
         errorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: errorColor)),
         labelStyle: const TextStyle(fontFamily: 'Cairo', color: textSecondaryColor),
       ),
+
+      // النصوص
       textTheme: const TextTheme(
         headlineLarge: TextStyle(fontFamily: 'Cairo', fontSize: 24, fontWeight: FontWeight.bold, color: textPrimaryColor),
         headlineMedium: TextStyle(fontFamily: 'Cairo', fontSize: 20, fontWeight: FontWeight.bold, color: textPrimaryColor),
