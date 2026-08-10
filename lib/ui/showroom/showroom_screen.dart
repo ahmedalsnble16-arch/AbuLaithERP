@@ -21,7 +21,7 @@ class _ShowroomScreenState extends State<ShowroomScreen>
   final ShowroomRepository _showroomRepo = ShowroomRepository();
   final Uuid _uuid = const Uuid();
 
-  // بيانات ثابتة (تحمّل مرة واحدة)
+  // بيانات ثابتة
   List<Product> _allProducts = [];
   List<Product> _products = [];
   List<Worker> _workers = [];
@@ -30,13 +30,16 @@ class _ShowroomScreenState extends State<ShowroomScreen>
   String _businessDate = DateTime.now().toIso8601String().substring(0, 10);
   final TextEditingController _dateController = TextEditingController();
 
-  // متحكمات السحبيات والمرتجعات – تُنشأ مرة واحدة وتُعاد تعبئتها
+  // متحكمات السحبيات والمرتجعات
   final Map<String, TextEditingController> _loadBoxesCtrl = {};
   final Map<String, TextEditingController> _loadPiecesCtrl = {};
   final Map<String, TextEditingController> _returnBoxesCtrl = {};
   final Map<String, TextEditingController> _returnPiecesCtrl = {};
 
-  // مدور الأمس
+  // متحكمات المدور عليه
+  final Map<String, TextEditingController> _remainingBoxesCtrl = {};
+  final Map<String, TextEditingController> _remainingPiecesCtrl = {};
+
   Map<String, int> _yesterdayRemaining = {};
 
   // العمال
@@ -46,7 +49,7 @@ class _ShowroomScreenState extends State<ShowroomScreen>
   // الخرج اليومي
   final List<_DynamicRow> _expenseRows = [];
 
-  // الكشف الصغير (تبويب 4)
+  // الكشف الصغير
   final List<_DynamicRow> _smallLedgerRows = [];
 
   // القات
@@ -80,7 +83,6 @@ class _ShowroomScreenState extends State<ShowroomScreen>
   void dispose() {
     _tabController.dispose();
     _dateController.dispose();
-    // تنظيف جميع المتحكمات
     _disposeAllProductControllers();
     for (var c in _advanceCtrl.values) { c.dispose(); }
     _clearExpenseControllers();
@@ -96,10 +98,14 @@ class _ShowroomScreenState extends State<ShowroomScreen>
     for (var c in _loadPiecesCtrl.values) { c.dispose(); }
     for (var c in _returnBoxesCtrl.values) { c.dispose(); }
     for (var c in _returnPiecesCtrl.values) { c.dispose(); }
+    for (var c in _remainingBoxesCtrl.values) { c.dispose(); }
+    for (var c in _remainingPiecesCtrl.values) { c.dispose(); }
     _loadBoxesCtrl.clear();
     _loadPiecesCtrl.clear();
     _returnBoxesCtrl.clear();
     _returnPiecesCtrl.clear();
+    _remainingBoxesCtrl.clear();
+    _remainingPiecesCtrl.clear();
   }
 
   void _clearExpenseControllers() {
@@ -123,12 +129,8 @@ class _ShowroomScreenState extends State<ShowroomScreen>
     }
   }
 
-  Future<String> _getCurrentUserRole() async {
-    // TODO: ربط حقيقي بالجلسة
-    return 'role_admin';
-  }
+  Future<String> _getCurrentUserRole() async => 'role_admin';
 
-  /// تحميل المنتجات والعمال لمرة واحدة
   Future<void> _loadStaticData() async {
     if (_staticDataLoaded) return;
     final products = await _productRepo.getAll();
@@ -138,29 +140,36 @@ class _ShowroomScreenState extends State<ShowroomScreen>
     _staticDataLoaded = true;
   }
 
-  /// تحميل البيانات الكاملة (الثابتة + المتغيرة بالتاريخ)
   Future<void> _loadAllData() async {
-    // تأكد من تحميل البيانات الثابتة أولاً
     await _loadStaticData();
     await _loadDailyData();
   }
 
-  /// تحميل البيانات المتغيرة بالتاريخ فقط (تستخدم عند تغيير اليوم)
   Future<void> _loadDailyData() async {
     if (!mounted) return;
     setState(() => _isLoading = true);
     try {
-      // إعادة بناء متحكمات المنتجات إذا تغيرت القائمة (نادر)
       _rebuildProductControllersIfNeeded();
 
-      // مدور الأمس لكل منتج
+      // جلب مدور الأمس من daily_remaining
       _yesterdayRemaining.clear();
+      final db = await _showroomRepo._dbHelper.database;
       for (var p in _products) {
-        final remaining = await _showroomRepo.getYesterdayRemaining(_businessDate, p.id);
-        _yesterdayRemaining[p.id] = remaining;
+        final remainingMaps = await db.query(
+          'daily_remaining',
+          columns: ['quantity'],
+          where: 'product_id = ? AND remaining_date < ?',
+          whereArgs: [p.id, _businessDate],
+          orderBy: 'remaining_date DESC',
+          limit: 1,
+        );
+        if (remainingMaps.isNotEmpty) {
+          _yesterdayRemaining[p.id] = remainingMaps.first['quantity'] as int? ?? 0;
+        } else {
+          _yesterdayRemaining[p.id] = 0;
+        }
       }
 
-      // تعبئة قيم اليوم الحالي
       for (var p in _products) {
         final entry = await _showroomRepo.getEntry(_businessDate, p.id);
         if (entry != null) {
@@ -176,13 +185,9 @@ class _ShowroomScreenState extends State<ShowroomScreen>
         }
       }
 
-      // العمال: إعادة تعبئة البرانيات إلى الصفر
-      for (var w in _workers) {
-        _advanceCtrl[w.id]?.text = '0';
-      }
+      for (var w in _workers) { _advanceCtrl[w.id]?.text = '0'; }
       _workerReceived = await _showroomRepo.getWorkerAttendance(_businessDate);
 
-      // اليوم السابق
       final prevDay = DateTime.parse(_businessDate)
           .subtract(const Duration(days: 1))
           .toIso8601String()
@@ -217,37 +222,34 @@ class _ShowroomScreenState extends State<ShowroomScreen>
     } catch (e) {
       debugPrint('Error loading daily data: $e');
     }
-    if (mounted) {
-      setState(() => _isLoading = false);
-    }
+    if (mounted) setState(() => _isLoading = false);
   }
 
-  /// تحميل أولي يجمع الثابت والمتغير
   Future<void> _loadStaticDataAndThenDailyData() async {
     await _loadStaticData();
-    // إنشاء المتحكمات مرة واحدة
     _buildProductControllers();
     await _loadDailyData();
   }
 
-  /// إنشاء متحكمات المنتجات (تُستدعى مرة واحدة)
   void _buildProductControllers() {
     for (var p in _products) {
       _loadBoxesCtrl[p.id] ??= TextEditingController(text: '0');
       _loadPiecesCtrl[p.id] ??= TextEditingController(text: '0');
       _returnBoxesCtrl[p.id] ??= TextEditingController(text: '0');
       _returnPiecesCtrl[p.id] ??= TextEditingController(text: '0');
+      _remainingBoxesCtrl[p.id] ??= TextEditingController(text: '0');
+      _remainingPiecesCtrl[p.id] ??= TextEditingController(text: '0');
     }
   }
 
-  /// إعادة بناء المتحكمات إذا تغيرت قائمة المنتجات (للأمان)
   void _rebuildProductControllersIfNeeded() {
-    // لو حصل تغيير نادر في المنتجات النشطة، نضمن وجود متحكم للجميع
     for (var p in _products) {
       _loadBoxesCtrl[p.id] ??= TextEditingController(text: '0');
       _loadPiecesCtrl[p.id] ??= TextEditingController(text: '0');
       _returnBoxesCtrl[p.id] ??= TextEditingController(text: '0');
       _returnPiecesCtrl[p.id] ??= TextEditingController(text: '0');
+      _remainingBoxesCtrl[p.id] ??= TextEditingController(text: '0');
+      _remainingPiecesCtrl[p.id] ??= TextEditingController(text: '0');
     }
   }
 
@@ -390,7 +392,6 @@ class _ShowroomScreenState extends State<ShowroomScreen>
       return;
     }
 
-    // استخدام saveAllEntries لحفظ جميع المنتجات في معاملة واحدة
     final List<Map<String, dynamic>> entries = [];
     for (var p in _products) {
       entries.add({
@@ -411,10 +412,36 @@ class _ShowroomScreenState extends State<ShowroomScreen>
         createdBy: 'admin',
         deviceId: 'mobile',
       );
+
+      final db = await _showroomRepo._dbHelper.database;
+      final now = DateTime.now().toIso8601String();
+      for (var p in _products) {
+        final boxes = int.tryParse(_remainingBoxesCtrl[p.id]?.text ?? '0') ?? 0;
+        final pieces = int.tryParse(_remainingPiecesCtrl[p.id]?.text ?? '0') ?? 0;
+        final totalPieces = (boxes * _getBoxSize(p.id)) + pieces;
+
+        await db.delete(
+          'daily_remaining',
+          where: 'product_id = ? AND remaining_date = ?',
+          whereArgs: [p.id, _businessDate],
+        );
+        await db.insert('daily_remaining', {
+          'id': _uuid.v4(),
+          'product_id': p.id,
+          'remaining_date': _businessDate,
+          'quantity': totalPieces,
+          'boxes': boxes,
+          'pieces': pieces,
+          'created_at': now,
+          'updated_at': now,
+          'created_by': 'admin',
+          'device_id': 'mobile',
+        });
+      }
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('تم حفظ حركات السحب والمرتجعات'),
-              backgroundColor: AppTheme.successColor),
+          const SnackBar(content: Text('تم حفظ جميع بيانات اليوم بنجاح'), backgroundColor: AppTheme.successColor),
         );
       }
     } catch (e) {
@@ -432,9 +459,7 @@ class _ShowroomScreenState extends State<ShowroomScreen>
       builder: (ctx) => AlertDialog(
         title: Text(title),
         content: Text(message),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('حسناً')),
-        ],
+        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('حسناً'))],
       ),
     );
   }
@@ -444,39 +469,21 @@ class _ShowroomScreenState extends State<ShowroomScreen>
     try {
       for (var w in _workers) {
         final present = _workerReceived[w.id] ?? false;
-        await _showroomRepo.setWorkerAttendance(
-          workerId: w.id, date: _businessDate, present: present,
-        );
+        await _showroomRepo.setWorkerAttendance(workerId: w.id, date: _businessDate, present: present);
         if (present) {
-          await _showroomRepo.recordWorkerDailyExpense(
-            workerId: w.id,
-            date: _businessDate,
-            amount: w.dailyExpense,
-            createdBy: 'admin',
-            deviceId: 'mobile',
-          );
+          await _showroomRepo.recordWorkerDailyExpense(workerId: w.id, date: _businessDate, amount: w.dailyExpense, createdBy: 'admin', deviceId: 'mobile');
         }
         final advance = double.tryParse(_advanceCtrl[w.id]?.text ?? '0') ?? 0;
         if (advance > 0) {
-          await _showroomRepo.saveWorkerAdvance(
-            workerId: w.id,
-            amount: advance,
-            date: _businessDate,
-            createdBy: 'admin',
-            deviceId: 'mobile',
-          );
+          await _showroomRepo.saveWorkerAdvance(workerId: w.id, amount: advance, date: _businessDate, createdBy: 'admin', deviceId: 'mobile');
         }
       }
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('تم حفظ كشف العمال'), backgroundColor: AppTheme.successColor),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم حفظ كشف العمال'), backgroundColor: AppTheme.successColor));
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('خطأ: $e'), backgroundColor: AppTheme.errorColor),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('خطأ: $e'), backgroundColor: AppTheme.errorColor));
       }
     }
   }
@@ -484,27 +491,39 @@ class _ShowroomScreenState extends State<ShowroomScreen>
   Future<void> _saveExpenses() async {
     if (!_editable) return;
     try {
-      final list = _expenseRows.map((row) => {
-        'id': row.id,
-        'amount': double.tryParse(row.amountCtrl.text) ?? 0,
-        'details': row.detailsCtrl.text,
-      }).toList();
-      await _showroomRepo.saveDailyExpenses(
-        businessDate: _businessDate,
-        expenses: list,
-        createdBy: 'admin',
-        deviceId: 'mobile',
-      );
+      final list = _expenseRows.map((row) => {'id': row.id, 'amount': double.tryParse(row.amountCtrl.text) ?? 0, 'details': row.detailsCtrl.text}).toList();
+      await _showroomRepo.saveDailyExpenses(businessDate: _businessDate, expenses: list, createdBy: 'admin', deviceId: 'mobile');
+
+      final db = await _showroomRepo._dbHelper.database;
+      for (var row in _expenseRows) {
+        final amount = double.tryParse(row.amountCtrl.text) ?? 0;
+        if (amount > 0) {
+          await db.insert('treasury', {
+            'id': _uuid.v4(),
+            'transaction_number': 'EXP-$_businessDate-${DateTime.now().millisecondsSinceEpoch}',
+            'transaction_type': 'صرف',
+            'amount': amount,
+            'source_module': 'معرض',
+            'source_id': _businessDate,
+            'payment_method': 'نقدي',
+            'note': 'خرج يومي: ${row.detailsCtrl.text}',
+            'transaction_date': _businessDate,
+            'status': 'معتمدة',
+            'created_at': DateTime.now().toIso8601String(),
+            'updated_at': DateTime.now().toIso8601String(),
+            'created_by': 'admin',
+            'device_id': 'mobile',
+            'sync_status': 'Pending',
+          });
+        }
+      }
+
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('تم حفظ الخرج اليومي'), backgroundColor: AppTheme.successColor),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم حفظ الخرج اليومي وترحيله للخزنة'), backgroundColor: AppTheme.successColor));
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('خطأ: $e'), backgroundColor: AppTheme.errorColor),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('خطأ: $e'), backgroundColor: AppTheme.errorColor));
       }
     }
   }
@@ -512,27 +531,39 @@ class _ShowroomScreenState extends State<ShowroomScreen>
   Future<void> _saveSmallLedger() async {
     if (!_editable) return;
     try {
-      final list = _smallLedgerRows.map((row) => {
-        'id': row.id,
-        'amount': double.tryParse(row.amountCtrl.text) ?? 0,
-        'details': row.detailsCtrl.text,
-      }).toList();
-      await _showroomRepo.saveSmallLedger(
-        businessDate: _businessDate,
-        entries: list,
-        createdBy: 'admin',
-        deviceId: 'mobile',
-      );
+      final list = _smallLedgerRows.map((row) => {'id': row.id, 'amount': double.tryParse(row.amountCtrl.text) ?? 0, 'details': row.detailsCtrl.text}).toList();
+      await _showroomRepo.saveSmallLedger(businessDate: _businessDate, entries: list, createdBy: 'admin', deviceId: 'mobile');
+
+      final db = await _showroomRepo._dbHelper.database;
+      for (var row in _smallLedgerRows) {
+        final amount = double.tryParse(row.amountCtrl.text) ?? 0;
+        if (amount > 0) {
+          await db.insert('treasury', {
+            'id': _uuid.v4(),
+            'transaction_number': 'SLD-$_businessDate-${DateTime.now().millisecondsSinceEpoch}',
+            'transaction_type': 'صرف',
+            'amount': amount,
+            'source_module': 'معرض',
+            'source_id': _businessDate,
+            'payment_method': 'نقدي',
+            'note': 'كشف صغير: ${row.detailsCtrl.text}',
+            'transaction_date': _businessDate,
+            'status': 'معتمدة',
+            'created_at': DateTime.now().toIso8601String(),
+            'updated_at': DateTime.now().toIso8601String(),
+            'created_by': 'admin',
+            'device_id': 'mobile',
+            'sync_status': 'Pending',
+          });
+        }
+      }
+
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('تم حفظ الكشف الصغير'), backgroundColor: AppTheme.successColor),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم حفظ الكشف الصغير وترحيله للخزنة'), backgroundColor: AppTheme.successColor));
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('خطأ: $e'), backgroundColor: AppTheme.errorColor),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('خطأ: $e'), backgroundColor: AppTheme.errorColor));
       }
     }
   }
@@ -540,27 +571,39 @@ class _ShowroomScreenState extends State<ShowroomScreen>
   Future<void> _saveKhat() async {
     if (!_editable) return;
     try {
-      final list = _khatRows.map((row) => {
-        'id': row.id,
-        'worker_name': row.workerNameCtrl.text,
-        'amount': double.tryParse(row.amountCtrl.text) ?? 0,
-      }).toList();
-      await _showroomRepo.saveKhat(
-        businessDate: _businessDate,
-        entries: list,
-        createdBy: 'admin',
-        deviceId: 'mobile',
-      );
+      final list = _khatRows.map((row) => {'id': row.id, 'worker_name': row.workerNameCtrl.text, 'amount': double.tryParse(row.amountCtrl.text) ?? 0}).toList();
+      await _showroomRepo.saveKhat(businessDate: _businessDate, entries: list, createdBy: 'admin', deviceId: 'mobile');
+
+      final db = await _showroomRepo._dbHelper.database;
+      for (var row in _khatRows) {
+        final amount = double.tryParse(row.amountCtrl.text) ?? 0;
+        if (amount > 0) {
+          await db.insert('treasury', {
+            'id': _uuid.v4(),
+            'transaction_number': 'KHT-$_businessDate-${DateTime.now().millisecondsSinceEpoch}',
+            'transaction_type': 'صرف',
+            'amount': amount,
+            'source_module': 'معرض',
+            'source_id': _businessDate,
+            'payment_method': 'نقدي',
+            'note': 'قات العمال: ${row.workerNameCtrl.text}',
+            'transaction_date': _businessDate,
+            'status': 'معتمدة',
+            'created_at': DateTime.now().toIso8601String(),
+            'updated_at': DateTime.now().toIso8601String(),
+            'created_by': 'admin',
+            'device_id': 'mobile',
+            'sync_status': 'Pending',
+          });
+        }
+      }
+
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('تم حفظ كشف القات'), backgroundColor: AppTheme.successColor),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم حفظ كشف القات وترحيله للخزنة'), backgroundColor: AppTheme.successColor));
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('خطأ: $e'), backgroundColor: AppTheme.errorColor),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('خطأ: $e'), backgroundColor: AppTheme.errorColor));
       }
     }
   }
@@ -569,16 +612,25 @@ class _ShowroomScreenState extends State<ShowroomScreen>
     if (!_editable) return;
     final showroomExpense = double.tryParse(_showroomExpenseCtrl.text) ?? 0;
     final cashReceived = double.tryParse(_cashReceivedCtrl.text) ?? 0;
-    
+
+    // حساب قيمة المدور الفعلي الذي أدخله المستخدم اليوم
+    double actualRemainingValue = 0;
+    for (var p in _products) {
+      final boxes = int.tryParse(_remainingBoxesCtrl[p.id]?.text ?? '0') ?? 0;
+      final pieces = int.tryParse(_remainingPiecesCtrl[p.id]?.text ?? '0') ?? 0;
+      final totalPieces = (boxes * _getBoxSize(p.id)) + pieces;
+      actualRemainingValue += totalPieces * _getRetailPrice(p.id);
+    }
+
     final previousDue = _prevRemainingValue + _prevResultAmount;
     final goodsNet = _totalLoadValue - _totalReturnValue;
     final totalDueFromGoods = previousDue + goodsNet;
-    
-    final totalExpenses = _totalWorkerExpenses + _totalAdvances + _totalDailyExpenses + _totalSmallLedger + showroomExpense;
-    final totalDue = totalDueFromGoods - totalExpenses;
-    
+
+    final totalExpenses = _totalWorkerExpenses + _totalAdvances + _totalDailyExpenses + _totalSmallLedger;
+    final totalDue = totalDueFromGoods - totalExpenses + showroomExpense;
+
     final result = totalDue - cashReceived;
-    
+
     String status;
     if (result > 0) {
       status = 'عجز';
@@ -590,7 +642,7 @@ class _ShowroomScreenState extends State<ShowroomScreen>
 
     await _showroomRepo.saveDailyAccount(
       businessDate: _businessDate,
-      previousRemainingValue: _prevRemainingValue,
+      previousRemainingValue: actualRemainingValue, // <-- استخدام القيمة الفعلية للمدور
       totalLoadValue: _totalLoadValue,
       totalReturnValue: _totalReturnValue,
       netGoodsValue: goodsNet,
@@ -623,26 +675,17 @@ class _ShowroomScreenState extends State<ShowroomScreen>
   Future<void> _confirmCash() async {
     if (!_editable) return;
     try {
-      await _showroomRepo.confirmCash(
-        businessDate: _businessDate,
-        confirmed: _cashConfirmed,
-        confirmedBy: 'admin',
-      );
+      await _showroomRepo.confirmCash(businessDate: _businessDate, confirmed: _cashConfirmed, confirmedBy: 'admin');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('تم تأكيد النقدية'), backgroundColor: AppTheme.successColor),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم تأكيد النقدية'), backgroundColor: AppTheme.successColor));
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('خطأ: $e'), backgroundColor: AppTheme.errorColor),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('خطأ: $e'), backgroundColor: AppTheme.errorColor));
       }
     }
   }
 
-  // ---------- واجهة المستخدم ----------
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -689,17 +732,8 @@ class _ShowroomScreenState extends State<ShowroomScreen>
     );
   }
 
-  void _printReport() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('جاري إعداد التقرير للطباعة...')),
-    );
-  }
-
-  void _exportReport() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('جاري تصدير التقرير...')),
-    );
-  }
+  void _printReport() => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('جاري إعداد التقرير للطباعة...')));
+  void _exportReport() => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('جاري تصدير التقرير...')));
 
   Widget _buildDateBar() {
     return Container(
@@ -707,37 +741,11 @@ class _ShowroomScreenState extends State<ShowroomScreen>
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       child: Row(
         children: [
-          IconButton(
-            icon: const Icon(Icons.chevron_right),
-            onPressed: () {
-              final d = DateTime.parse(_businessDate).subtract(const Duration(days: 1));
-              _businessDate = d.toIso8601String().substring(0, 10);
-              _dateController.text = _businessDate;
-              _loadDailyData();
-            },
-          ),
+          IconButton(icon: const Icon(Icons.chevron_right), onPressed: () { final d = DateTime.parse(_businessDate).subtract(const Duration(days: 1)); _businessDate = d.toIso8601String().substring(0, 10); _dateController.text = _businessDate; _loadDailyData(); }),
           Expanded(
-            child: TextField(
-              controller: _dateController,
-              textAlign: TextAlign.center,
-              decoration: const InputDecoration(labelText: 'التاريخ', isDense: true, border: OutlineInputBorder()),
-              onSubmitted: (v) {
-                if (v.trim().isNotEmpty) {
-                  _businessDate = v.trim();
-                  _loadDailyData();
-                }
-              },
-            ),
+            child: TextField(controller: _dateController, textAlign: TextAlign.center, decoration: const InputDecoration(labelText: 'التاريخ', isDense: true, border: OutlineInputBorder()), onSubmitted: (v) { if (v.trim().isNotEmpty) { _businessDate = v.trim(); _loadDailyData(); } }),
           ),
-          IconButton(
-            icon: const Icon(Icons.chevron_left),
-            onPressed: () {
-              final d = DateTime.parse(_businessDate).add(const Duration(days: 1));
-              _businessDate = d.toIso8601String().substring(0, 10);
-              _dateController.text = _businessDate;
-              _loadDailyData();
-            },
-          ),
+          IconButton(icon: const Icon(Icons.chevron_left), onPressed: () { final d = DateTime.parse(_businessDate).add(const Duration(days: 1)); _businessDate = d.toIso8601String().substring(0, 10); _dateController.text = _businessDate; _loadDailyData(); }),
         ],
       ),
     );
@@ -776,26 +784,10 @@ class _ShowroomScreenState extends State<ShowroomScreen>
                     return DataRow(cells: [
                       DataCell(Text(p.name)),
                       DataCell(Text('${p.piecesPerBox}')),
-                      DataCell(SizedBox(width: 60, child: TextField(
-                          enabled: _editable,
-                          controller: _loadBoxesCtrl[p.id],
-                          keyboardType: TextInputType.number,
-                          onChanged: (_) => setState((){})))),
-                      DataCell(SizedBox(width: 60, child: TextField(
-                          enabled: _editable,
-                          controller: _loadPiecesCtrl[p.id],
-                          keyboardType: TextInputType.number,
-                          onChanged: (_) => setState((){})))),
-                      DataCell(SizedBox(width: 60, child: TextField(
-                          enabled: _editable,
-                          controller: _returnBoxesCtrl[p.id],
-                          keyboardType: TextInputType.number,
-                          onChanged: (_) => setState((){})))),
-                      DataCell(SizedBox(width: 60, child: TextField(
-                          enabled: _editable,
-                          controller: _returnPiecesCtrl[p.id],
-                          keyboardType: TextInputType.number,
-                          onChanged: (_) => setState((){})))),
+                      DataCell(SizedBox(width: 60, child: TextField(enabled: _editable, controller: _loadBoxesCtrl[p.id], keyboardType: TextInputType.number, onChanged: (_) => setState((){})))),
+                      DataCell(SizedBox(width: 60, child: TextField(enabled: _editable, controller: _loadPiecesCtrl[p.id], keyboardType: TextInputType.number, onChanged: (_) => setState((){})))),
+                      DataCell(SizedBox(width: 60, child: TextField(enabled: _editable, controller: _returnBoxesCtrl[p.id], keyboardType: TextInputType.number, onChanged: (_) => setState((){})))),
+                      DataCell(SizedBox(width: 60, child: TextField(enabled: _editable, controller: _returnPiecesCtrl[p.id], keyboardType: TextInputType.number, onChanged: (_) => setState((){})))),
                       DataCell(Text('${_getLoadValue(p.id).toStringAsFixed(0)}')),
                       DataCell(Text('${_getReturnValue(p.id).toStringAsFixed(0)}')),
                       DataCell(Text('${(_getLoadValue(p.id) - _getReturnValue(p.id)).toStringAsFixed(0)}')),
@@ -806,14 +798,14 @@ class _ShowroomScreenState extends State<ShowroomScreen>
             ),
           ),
           const SizedBox(height: 12),
-          // قسم المدور عليه التفصيلي
+          // ***** قسم المدور عليه - إدخال مباشر *****
           Card(
             child: Padding(
               padding: const EdgeInsets.all(12),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('📦 المدور عليه (البضاعة المتبقية في المعرض)',
+                  const Text('📦 إدخال المدور عليه (البضاعة المتبقية فعلياً)',
                       style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                   const SizedBox(height: 8),
                   SingleChildScrollView(
@@ -827,14 +819,14 @@ class _ShowroomScreenState extends State<ShowroomScreen>
                         DataColumn(label: Text('القيمة الإجمالية')),
                       ],
                       rows: _products.map((p) {
-                        final totalPieces = _getCurrentRemainingPieces(p.id);
-                        final boxes = totalPieces ~/ _getBoxSize(p.id);
-                        final pieces = totalPieces % _getBoxSize(p.id);
+                        final boxes = int.tryParse(_remainingBoxesCtrl[p.id]?.text ?? '0') ?? 0;
+                        final pieces = int.tryParse(_remainingPiecesCtrl[p.id]?.text ?? '0') ?? 0;
+                        final totalPieces = (boxes * _getBoxSize(p.id)) + pieces;
                         final value = totalPieces * _getRetailPrice(p.id);
                         return DataRow(cells: [
                           DataCell(Text(p.name)),
-                          DataCell(Text('$boxes')),
-                          DataCell(Text('$pieces')),
+                          DataCell(SizedBox(width: 60, child: TextField(enabled: _editable, controller: _remainingBoxesCtrl[p.id], keyboardType: TextInputType.number, onChanged: (_) => setState((){})))),
+                          DataCell(SizedBox(width: 60, child: TextField(enabled: _editable, controller: _remainingPiecesCtrl[p.id], keyboardType: TextInputType.number, onChanged: (_) => setState((){})))),
                           DataCell(Text('${_getRetailPrice(p.id)}')),
                           DataCell(Text('${value.toStringAsFixed(0)}')),
                         ]);
@@ -842,9 +834,11 @@ class _ShowroomScreenState extends State<ShowroomScreen>
                     ),
                   ),
                   const SizedBox(height: 8),
-                  Text('إجمالي قيمة المدور عليه: ${_products.fold<double>(0, (sum, p) {
-                    final total = _getCurrentRemainingPieces(p.id);
-                    return sum + (total * _getRetailPrice(p.id));
+                  Text('إجمالي قيمة المدور عليه المدخل: ${_products.fold<double>(0, (sum, p) {
+                    final boxes = int.tryParse(_remainingBoxesCtrl[p.id]?.text ?? '0') ?? 0;
+                    final pieces = int.tryParse(_remainingPiecesCtrl[p.id]?.text ?? '0') ?? 0;
+                    final totalPieces = (boxes * _getBoxSize(p.id)) + pieces;
+                    return sum + (totalPieces * _getRetailPrice(p.id));
                   }).toStringAsFixed(0)}', style: const TextStyle(fontWeight: FontWeight.bold)),
                 ],
               ),
@@ -854,7 +848,7 @@ class _ShowroomScreenState extends State<ShowroomScreen>
           ElevatedButton.icon(
             onPressed: _editable ? _saveCurrentTab1 : null,
             icon: const Icon(Icons.save),
-            label: const Text('حفظ حركات السحب والمرتجعات'),
+            label: const Text('حفظ حركات اليوم والمدور عليه'),
             style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(45)),
           ),
         ],
@@ -888,14 +882,8 @@ class _ShowroomScreenState extends State<ShowroomScreen>
                     return DataRow(cells: [
                       DataCell(Text(w.name)),
                       DataCell(Text('${w.dailyExpense}')),
-                      DataCell(Checkbox(
-                          value: _workerReceived[w.id] ?? false,
-                          onChanged: _editable ? (v) => setState(() => _workerReceived[w.id] = v ?? false) : null)),
-                      DataCell(SizedBox(width: 80, child: TextField(
-                          enabled: _editable,
-                          controller: _advanceCtrl[w.id],
-                          keyboardType: TextInputType.number,
-                          onChanged: (_) => setState((){})))),
+                      DataCell(Checkbox(value: _workerReceived[w.id] ?? false, onChanged: _editable ? (v) => setState(() => _workerReceived[w.id] = v ?? false) : null)),
+                      DataCell(SizedBox(width: 80, child: TextField(enabled: _editable, controller: _advanceCtrl[w.id], keyboardType: TextInputType.number, onChanged: (_) => setState((){})))),
                     ]);
                   }).toList(),
                 ),
@@ -931,24 +919,10 @@ class _ShowroomScreenState extends State<ShowroomScreen>
                 padding: const EdgeInsets.all(8),
                 child: Row(
                   children: [
-                    Expanded(flex: 2, child: TextField(
-                      enabled: _editable,
-                      controller: row.amountCtrl,
-                      decoration: const InputDecoration(labelText: 'المبلغ', isDense: true),
-                      keyboardType: TextInputType.number,
-                      onChanged: (_) => setState((){}),
-                    )),
+                    Expanded(flex: 2, child: TextField(enabled: _editable, controller: row.amountCtrl, decoration: const InputDecoration(labelText: 'المبلغ', isDense: true), keyboardType: TextInputType.number, onChanged: (_) => setState((){}))),
                     const SizedBox(width: 8),
-                    Expanded(flex: 4, child: TextField(
-                      enabled: _editable,
-                      controller: row.detailsCtrl,
-                      decoration: const InputDecoration(labelText: 'التفاصيل', isDense: true),
-                    )),
-                    if (_editable)
-                      IconButton(
-                        icon: const Icon(Icons.delete_outline, color: AppTheme.errorColor),
-                        onPressed: () => setState(() => _expenseRows.removeAt(i)),
-                      ),
+                    Expanded(flex: 4, child: TextField(enabled: _editable, controller: row.detailsCtrl, decoration: const InputDecoration(labelText: 'التفاصيل', isDense: true))),
+                    if (_editable) IconButton(icon: const Icon(Icons.delete_outline, color: AppTheme.errorColor), onPressed: () => setState(() => _expenseRows.removeAt(i))),
                   ],
                 ),
               ),
@@ -957,14 +931,8 @@ class _ShowroomScreenState extends State<ShowroomScreen>
           if (_editable)
             Row(
               children: [
-                Expanded(child: TextButton.icon(
-                  onPressed: () => setState(() => _expenseRows.add(_DynamicRow(id: _uuid.v4()))),
-                  icon: const Icon(Icons.add), label: const Text('إضافة صف'),
-                )),
-                Expanded(child: ElevatedButton.icon(
-                  onPressed: _saveExpenses,
-                  icon: const Icon(Icons.save), label: const Text('حفظ الخرج'),
-                )),
+                Expanded(child: TextButton.icon(onPressed: () => setState(() => _expenseRows.add(_DynamicRow(id: _uuid.v4()))), icon: const Icon(Icons.add), label: const Text('إضافة صف'))),
+                Expanded(child: ElevatedButton.icon(onPressed: _saveExpenses, icon: const Icon(Icons.save), label: const Text('حفظ الخرج وترحيله للخزنة'))),
               ],
             ),
         ],
@@ -981,8 +949,8 @@ class _ShowroomScreenState extends State<ShowroomScreen>
     final goodsNet = _totalLoadValue - _totalReturnValue;
     final totalDueFromGoods = previousDue + goodsNet;
     
-    final totalExpenses = _totalWorkerExpenses + _totalAdvances + _totalDailyExpenses + _totalSmallLedger + showroomExpense;
-    final totalDue = totalDueFromGoods - totalExpenses;
+    final totalExpenses = _totalWorkerExpenses + _totalAdvances + _totalDailyExpenses + _totalSmallLedger;
+    final totalDue = totalDueFromGoods - totalExpenses + showroomExpense;
     final result = totalDue - cashReceived;
 
     return SingleChildScrollView(
@@ -990,8 +958,7 @@ class _ShowroomScreenState extends State<ShowroomScreen>
       child: Column(
         children: [
           _accountTile('مدور البضاعة السابق (+)', _prevRemainingValue, color: AppTheme.primaryColor),
-          _accountTile('العجز / الزيادة السابقة (مستحق)', _prevResultAmount,
-              color: _prevResultAmount > 0 ? AppTheme.errorColor : (_prevResultAmount < 0 ? AppTheme.successColor : null)),
+          _accountTile('العجز / الزيادة السابقة (مستحق)', _prevResultAmount, color: _prevResultAmount > 0 ? AppTheme.errorColor : (_prevResultAmount < 0 ? AppTheme.successColor : null)),
           _accountTile('قيمة السحبيات (+)', _totalLoadValue, color: AppTheme.errorColor),
           _accountTile('قيمة المرتجعات (-)', -_totalReturnValue, color: AppTheme.successColor),
           _accountTile('صافي حركة البضاعة اليوم', goodsNet),
@@ -1001,9 +968,9 @@ class _ShowroomScreenState extends State<ShowroomScreen>
           _accountTile('البرانيات (-)', -_totalAdvances, color: AppTheme.successColor),
           _accountTile('الخرج اليومي (-)', -_totalDailyExpenses, color: AppTheme.successColor),
           _accountTile('إجمالي الكشف الصغير (-)', -_totalSmallLedger, color: AppTheme.successColor),
-          _accountTile('مصروف المعرض (-)', -showroomExpense, color: AppTheme.successColor),
+          _accountTile('مصروف المعرض (+) [سلفة/التزام]', showroomExpense, color: AppTheme.errorColor),
           
-          // الكشف الصغير (جدول ديناميكي)
+          // الكشف الصغير
           Card(
             margin: const EdgeInsets.symmetric(vertical: 8),
             child: Padding(
@@ -1019,30 +986,10 @@ class _ShowroomScreenState extends State<ShowroomScreen>
                       padding: const EdgeInsets.symmetric(vertical: 4.0),
                       child: Row(
                         children: [
-                          Expanded(
-                            flex: 2,
-                            child: TextField(
-                              enabled: _editable,
-                              controller: row.amountCtrl,
-                              decoration: const InputDecoration(labelText: 'المبلغ', isDense: true, border: OutlineInputBorder()),
-                              keyboardType: TextInputType.number,
-                              onChanged: (_) => setState((){}),
-                            ),
-                          ),
+                          Expanded(flex: 2, child: TextField(enabled: _editable, controller: row.amountCtrl, decoration: const InputDecoration(labelText: 'المبلغ', isDense: true, border: OutlineInputBorder()), keyboardType: TextInputType.number, onChanged: (_) => setState((){}))),
                           const SizedBox(width: 8),
-                          Expanded(
-                            flex: 4,
-                            child: TextField(
-                              enabled: _editable,
-                              controller: row.detailsCtrl,
-                              decoration: const InputDecoration(labelText: 'التفاصيل', isDense: true, border: OutlineInputBorder()),
-                            ),
-                          ),
-                          if (_editable)
-                            IconButton(
-                              icon: const Icon(Icons.delete_outline, color: AppTheme.errorColor),
-                              onPressed: () => setState(() => _smallLedgerRows.removeAt(i)),
-                            ),
+                          Expanded(flex: 4, child: TextField(enabled: _editable, controller: row.detailsCtrl, decoration: const InputDecoration(labelText: 'التفاصيل', isDense: true, border: OutlineInputBorder()))),
+                          if (_editable) IconButton(icon: const Icon(Icons.delete_outline, color: AppTheme.errorColor), onPressed: () => setState(() => _smallLedgerRows.removeAt(i))),
                         ],
                       ),
                     );
@@ -1051,15 +998,9 @@ class _ShowroomScreenState extends State<ShowroomScreen>
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        TextButton.icon(
-                          onPressed: () => setState(() => _smallLedgerRows.add(_DynamicRow(id: _uuid.v4()))),
-                          icon: const Icon(Icons.add), label: const Text('إضافة صف'),
-                        ),
+                        TextButton.icon(onPressed: () => setState(() => _smallLedgerRows.add(_DynamicRow(id: _uuid.v4()))), icon: const Icon(Icons.add), label: const Text('إضافة صف')),
                         Text('إجمالي الكشف الصغير: $_totalSmallLedger', style: const TextStyle(fontWeight: FontWeight.bold)),
-                        ElevatedButton(
-                          onPressed: _saveSmallLedger,
-                          child: const Text('حفظ الكشف الصغير'),
-                        ),
+                        ElevatedButton(onPressed: _saveSmallLedger, child: const Text('حفظ الكشف الصغير')),
                       ],
                     ),
                 ],
@@ -1070,16 +1011,7 @@ class _ShowroomScreenState extends State<ShowroomScreen>
           Card(
             child: ListTile(
               title: const Text('مصروف المعرض'),
-              trailing: SizedBox(
-                width: 120,
-                child: TextField(
-                  enabled: _editable,
-                  controller: _showroomExpenseCtrl,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(isDense: true, border: OutlineInputBorder()),
-                  onChanged: (_) => setState((){}),
-                ),
-              ),
+              trailing: SizedBox(width: 120, child: TextField(enabled: _editable, controller: _showroomExpenseCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(isDense: true, border: OutlineInputBorder()), onChanged: (_) => setState((){}))),
             ),
           ),
           const Divider(thickness: 2),
@@ -1087,60 +1019,20 @@ class _ShowroomScreenState extends State<ShowroomScreen>
           Card(
             child: ListTile(
               title: const Text('الواصل نقداً', style: TextStyle(fontWeight: FontWeight.bold)),
-              trailing: SizedBox(
-                width: 120,
-                child: TextField(
-                  enabled: _editable,
-                  controller: _cashReceivedCtrl,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(isDense: true, border: OutlineInputBorder()),
-                  onChanged: (_) => setState((){}),
-                ),
-              ),
+              trailing: SizedBox(width: 120, child: TextField(enabled: _editable, controller: _cashReceivedCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(isDense: true, border: OutlineInputBorder()), onChanged: (_) => setState((){}))),
             ),
           ),
-          if (_isAdmin)
-            CheckboxListTile(
-              title: const Text('تأكيد استلام النقدية (صلاحية المدير)'),
-              value: _cashConfirmed,
-              onChanged: _editable ? (v) {
-                setState(() => _cashConfirmed = v ?? false);
-                _confirmCash();
-              } : null,
-            )
-          else
-            ListTile(
-              title: const Text('النقدية غير مؤكدة'),
-              subtitle: const Text('تحتاج صلاحية المدير للتأكيد'),
-              trailing: Icon(_cashConfirmed ? Icons.check_circle : Icons.cancel,
-                  color: _cashConfirmed ? AppTheme.successColor : AppTheme.warningColor),
-            ),
+          if (_isAdmin) CheckboxListTile(title: const Text('تأكيد استلام النقدية (صلاحية المدير)'), value: _cashConfirmed, onChanged: _editable ? (v) { setState(() => _cashConfirmed = v ?? false); _confirmCash(); } : null)
+          else ListTile(title: const Text('النقدية غير مؤكدة'), subtitle: const Text('تحتاج صلاحية المدير للتأكيد'), trailing: Icon(_cashConfirmed ? Icons.check_circle : Icons.cancel, color: _cashConfirmed ? AppTheme.successColor : AppTheme.warningColor)),
           const Divider(),
           Card(
-            color: (result == 0)
-                ? Colors.green.shade50
-                : (result > 0 ? Colors.red.shade50 : Colors.blue.shade50),
+            color: (result == 0) ? Colors.green.shade50 : (result > 0 ? Colors.red.shade50 : Colors.blue.shade50),
             child: Padding(
               padding: const EdgeInsets.all(16.0),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    'النتيجة: ${result > 0 ? "عجز" : (result < 0 ? "زيادة" : "مطابق")}',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: (result == 0)
-                          ? AppTheme.successColor
-                          : (result > 0 ? AppTheme.errorColor : AppTheme.primaryColor),
-                    ),
-                  ),
-                  Text(
-                    '${result.abs().toStringAsFixed(2)} ريال',
-                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                  ),
-                ],
-              ),
+              child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                Text('النتيجة: ${result > 0 ? "عجز" : (result < 0 ? "زيادة" : "مطابق")}', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: (result == 0) ? AppTheme.successColor : (result > 0 ? AppTheme.errorColor : AppTheme.primaryColor))),
+                Text('${result.abs().toStringAsFixed(2)} ريال', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              ]),
             ),
           ),
           const SizedBox(height: 16),
@@ -1148,10 +1040,7 @@ class _ShowroomScreenState extends State<ShowroomScreen>
             onPressed: _editable ? _saveAndCloseDay : null,
             icon: const Icon(Icons.lock),
             label: const Text('حفظ وإغلاق اليومية'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppTheme.primaryColor,
-              minimumSize: const Size.fromHeight(50),
-            ),
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryColor, minimumSize: const Size.fromHeight(50)),
           ),
         ],
       ),
@@ -1172,54 +1061,20 @@ class _ShowroomScreenState extends State<ShowroomScreen>
               margin: const EdgeInsets.symmetric(vertical: 4),
               child: Padding(
                 padding: const EdgeInsets.all(8),
-                child: Row(
-                  children: [
-                    Expanded(
-                      flex: 3,
-                      child: TextField(
-                        enabled: _editable,
-                        controller: row.workerNameCtrl,
-                        decoration: const InputDecoration(labelText: 'اسم العامل', isDense: true),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      flex: 2,
-                      child: TextField(
-                        enabled: _editable,
-                        controller: row.amountCtrl,
-                        decoration: const InputDecoration(labelText: 'المبلغ', isDense: true),
-                        keyboardType: TextInputType.number,
-                        onChanged: (_) => setState(() {}),
-                      ),
-                    ),
-                    if (_editable)
-                      IconButton(
-                        icon: const Icon(Icons.delete_outline, color: AppTheme.errorColor),
-                        onPressed: () => setState(() => _khatRows.removeAt(i)),
-                      ),
-                  ],
-                ),
+                child: Row(children: [
+                  Expanded(flex: 3, child: TextField(enabled: _editable, controller: row.workerNameCtrl, decoration: const InputDecoration(labelText: 'اسم العامل', isDense: true))),
+                  const SizedBox(width: 8),
+                  Expanded(flex: 2, child: TextField(enabled: _editable, controller: row.amountCtrl, decoration: const InputDecoration(labelText: 'المبلغ', isDense: true), keyboardType: TextInputType.number, onChanged: (_) => setState(() {}))),
+                  if (_editable) IconButton(icon: const Icon(Icons.delete_outline, color: AppTheme.errorColor), onPressed: () => setState(() => _khatRows.removeAt(i))),
+                ]),
               ),
             );
           }),
           if (_editable)
             Row(
               children: [
-                Expanded(
-                  child: TextButton.icon(
-                    onPressed: () => setState(() => _khatRows.add(_KhatRow(id: _uuid.v4()))),
-                    icon: const Icon(Icons.add),
-                    label: const Text('إضافة عامل'),
-                  ),
-                ),
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: _saveKhat,
-                    icon: const Icon(Icons.save),
-                    label: const Text('حفظ القات'),
-                  ),
-                ),
+                Expanded(child: TextButton.icon(onPressed: () => setState(() => _khatRows.add(_KhatRow(id: _uuid.v4()))), icon: const Icon(Icons.add), label: const Text('إضافة عامل'))),
+                Expanded(child: ElevatedButton.icon(onPressed: _saveKhat, icon: const Icon(Icons.save), label: const Text('حفظ القات وترحيله للخزنة'))),
               ],
             ),
         ],
@@ -1233,16 +1088,11 @@ class _ShowroomScreenState extends State<ShowroomScreen>
         color: color.withAlpha(20),
         child: Padding(
           padding: const EdgeInsets.all(12),
-          child: Column(
-            children: [
-              Text(title, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 4),
-              Text(
-                amount.toStringAsFixed(0),
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: color),
-              ),
-            ],
-          ),
+          child: Column(children: [
+            Text(title, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 4),
+            Text(amount.toStringAsFixed(0), style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: color)),
+          ]),
         ),
       ),
     );
@@ -1251,21 +1101,8 @@ class _ShowroomScreenState extends State<ShowroomScreen>
   Widget _accountTile(String title, double amount, {bool bold = false, Color? color}) {
     return ListTile(
       dense: true,
-      title: Text(
-        title,
-        style: TextStyle(
-          fontWeight: bold ? FontWeight.bold : FontWeight.normal,
-          fontSize: bold ? 15 : 13,
-        ),
-      ),
-      trailing: Text(
-        amount.toStringAsFixed(2),
-        style: TextStyle(
-          fontWeight: bold ? FontWeight.bold : FontWeight.normal,
-          fontSize: bold ? 15 : 13,
-          color: color,
-        ),
-      ),
+      title: Text(title, style: TextStyle(fontWeight: bold ? FontWeight.bold : FontWeight.normal, fontSize: bold ? 15 : 13)),
+      trailing: Text(amount.toStringAsFixed(2), style: TextStyle(fontWeight: bold ? FontWeight.bold : FontWeight.normal, fontSize: bold ? 15 : 13, color: color)),
     );
   }
 }
@@ -1276,11 +1113,8 @@ class _DynamicRow {
   final TextEditingController amountCtrl;
   final TextEditingController detailsCtrl;
 
-  _DynamicRow({
-    required this.id,
-    TextEditingController? amountCtrl,
-    TextEditingController? detailsCtrl,
-  })  : amountCtrl = amountCtrl ?? TextEditingController(text: '0'),
+  _DynamicRow({required this.id, TextEditingController? amountCtrl, TextEditingController? detailsCtrl})
+      : amountCtrl = amountCtrl ?? TextEditingController(text: '0'),
         detailsCtrl = detailsCtrl ?? TextEditingController();
 }
 
@@ -1289,10 +1123,7 @@ class _KhatRow {
   final TextEditingController workerNameCtrl;
   final TextEditingController amountCtrl;
 
-  _KhatRow({
-    required this.id,
-    TextEditingController? workerNameCtrl,
-    TextEditingController? amountCtrl,
-  })  : workerNameCtrl = workerNameCtrl ?? TextEditingController(),
+  _KhatRow({required this.id, TextEditingController? workerNameCtrl, TextEditingController? amountCtrl})
+      : workerNameCtrl = workerNameCtrl ?? TextEditingController(),
         amountCtrl = amountCtrl ?? TextEditingController(text: '0');
 }
