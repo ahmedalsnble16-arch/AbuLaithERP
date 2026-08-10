@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import '../../core/constants/db_constants.dart';
 import '../../core/database/database_helper.dart';
 import '../../data/models/distributor.dart';
-import 'distributor_load_detail_screen.dart';
+import 'Distributor_Load_Detail_Screen.dart';
 
 class DistributorAccountScreen extends StatefulWidget {
   final Distributor distributor;
