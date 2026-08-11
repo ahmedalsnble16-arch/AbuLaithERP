@@ -22,7 +22,8 @@ class DistributorReturnRepository {
 
     String distributorName = '';
     try {
-      final distRes = await _dbHelper.database.query(
+      final db = await _dbHelper.database;
+      final distRes = await db.query(
         DBConstants.tableDistributors,
         columns: ['name'],
         where: 'id = ?',
