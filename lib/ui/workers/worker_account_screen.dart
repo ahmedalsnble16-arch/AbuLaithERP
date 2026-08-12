@@ -54,14 +54,31 @@ class _WorkerAccountScreenState extends State<WorkerAccountScreen> {
     );
     final activeDays = attendances.map((a) => a['date'] as String).toSet();
 
-    // جلب المصاريف من المعرض
-    final expenses = await db.rawQuery('''
+    // جلب المصاريف من worker_daily_expenses
+    final expenses1 = await db.rawQuery('''
       SELECT date, COALESCE(SUM(amount), 0) as total
       FROM worker_daily_expenses
       WHERE worker_id = ? AND strftime("%Y-%m", date) = ?
       GROUP BY date
     ''', [widget.workerId, _selectedMonth]);
-    final expenseMap = {for (var e in expenses) e['date'] as String: (e['total'] as num?)?.toDouble() ?? 0};
+
+    // جلب المصاريف من worker_accounts (المصروف اليومي من المعرض)
+    final expenses2 = await db.rawQuery('''
+      SELECT transaction_date as date, COALESCE(SUM(amount), 0) as total
+      FROM ${DBConstants.tableWorkerAccounts}
+      WHERE worker_id = ? AND transaction_type = 'مصروف يومي' AND strftime("%Y-%m", transaction_date) = ?
+      GROUP BY transaction_date
+    ''', [widget.workerId, _selectedMonth]);
+
+    // دمج المصاريف من المصدرين
+    final expenseMap = <String, double>{};
+    for (var e in expenses1) {
+      expenseMap[e['date'] as String] = (e['total'] as num?)?.toDouble() ?? 0;
+    }
+    for (var e in expenses2) {
+      final date = e['date'] as String;
+      expenseMap[date] = (expenseMap[date] ?? 0) + ((e['total'] as num?)?.toDouble() ?? 0);
+    }
 
     // جلب البرانيات
     final braneyat = await db.rawQuery('''
@@ -200,7 +217,6 @@ class _WorkerAccountScreenState extends State<WorkerAccountScreen> {
               padding: const EdgeInsets.all(8),
               child: Column(
                 children: [
-                  // محدد الشهر
                   Row(
                     children: [
                       IconButton(icon: const Icon(Icons.chevron_right), onPressed: () {
@@ -219,7 +235,6 @@ class _WorkerAccountScreenState extends State<WorkerAccountScreen> {
                     ],
                   ),
                   const SizedBox(height: 8),
-                  // معلومات العامل
                   Card(
                     child: Padding(
                       padding: const EdgeInsets.all(8),
@@ -234,7 +249,6 @@ class _WorkerAccountScreenState extends State<WorkerAccountScreen> {
                     ),
                   ),
                   const SizedBox(height: 8),
-                  // جدول الأيام
                   Card(
                     child: SingleChildScrollView(
                       scrollDirection: Axis.horizontal,
@@ -251,26 +265,17 @@ class _WorkerAccountScreenState extends State<WorkerAccountScreen> {
                           final row = _dailyRows[index];
                           return DataRow(cells: [
                             DataCell(Text('${row['day']}')),
-                            DataCell(
-                              Checkbox(
-                                value: row['isActive'] as bool,
-                                onChanged: (_) => _toggleDay(index),
-                              ),
-                            ),
+                            DataCell(Checkbox(value: row['isActive'] as bool, onChanged: (_) => _toggleDay(index))),
                             DataCell(Text('${row['expense']}')),
                             DataCell(Text('${row['braneyat']}')),
                             DataCell(Text('${row['additionsTotal']}')),
-                            DataCell(IconButton(
-                              icon: const Icon(Icons.add_circle, color: AppTheme.primaryColor),
-                              onPressed: () => _addAddition(row['date'] as String),
-                            )),
+                            DataCell(IconButton(icon: const Icon(Icons.add_circle, color: AppTheme.primaryColor), onPressed: () => _addAddition(row['date'] as String))),
                           ]);
                         }),
                       ),
                     ),
                   ),
                   const SizedBox(height: 16),
-                  // ملخص الحساب
                   Card(
                     color: AppTheme.primaryColor.withAlpha(15),
                     child: Padding(
