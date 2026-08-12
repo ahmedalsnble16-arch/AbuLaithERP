@@ -336,6 +336,7 @@ class ShowroomRepository {
     }
   }
 
+  // ========== تم تغيير 'سلفة (برانية)' إلى 'برانية' ==========
   Future<void> saveWorkerAdvance({
     required String workerId,
     required double amount,
@@ -349,7 +350,7 @@ class ShowroomRepository {
     await db.insert(DBConstants.tableWorkerAccounts, {
       'id': _uuid.v4(),
       'worker_id': workerId,
-      'transaction_type': 'سلفة (برانية)',
+      'transaction_type': 'برانية',
       'amount': amount,
       'description': 'برانية من المعرض بتاريخ $date',
       'transaction_date': date,
@@ -366,7 +367,7 @@ class ShowroomRepository {
       SELECT wa.*, w.name as worker_name
       FROM ${DBConstants.tableWorkerAccounts} wa
       JOIN ${DBConstants.tableWorkers} w ON wa.worker_id = w.id
-      WHERE wa.transaction_type = 'سلفة (برانية)'
+      WHERE wa.transaction_type = 'برانية'
         AND wa.transaction_date = ?
       ORDER BY wa.created_at
     ''', [date]);
@@ -514,7 +515,6 @@ class ShowroomRepository {
       }
 
       if (closed) {
-        // قيد الخزنة
         if (cashReceived > 0) {
           await txn.insert(DBConstants.tableTreasury, {
             'id': _uuid.v4(),
@@ -537,7 +537,6 @@ class ShowroomRepository {
           });
         }
 
-        // قيد الخرج اليومي (منفصل)
         if (totalDailyExpenses > 0) {
           await txn.insert(DBConstants.tableExpenses, {
             'id': _uuid.v4(),
@@ -557,7 +556,6 @@ class ShowroomRepository {
           });
         }
 
-        // قيد الكشف الصغير (منفصل)
         if (totalSmallLedger > 0) {
           await txn.insert(DBConstants.tableExpenses, {
             'id': _uuid.v4(),
@@ -577,7 +575,6 @@ class ShowroomRepository {
           });
         }
 
-        // Audit للإغلاق
         await txn.insert(DBConstants.tableAuditLogs, {
           'id': _uuid.v4(),
           'user_id': createdBy,
