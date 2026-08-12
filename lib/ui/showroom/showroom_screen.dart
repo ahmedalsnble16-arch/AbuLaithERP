@@ -628,7 +628,9 @@ class _ShowroomScreenState extends State<ShowroomScreen>
     final totalDueFromGoods = previousDue + goodsNet;
 
     final totalExpenses = _totalWorkerExpenses + _totalAdvances + _totalDailyExpenses + _totalSmallLedger;
-    final totalDue = totalDueFromGoods - totalExpenses + showroomExpense;
+    // ========== الإصلاح المحاسبي الوحيد: خصم المدور عليه ==========
+    final totalDue = totalDueFromGoods - totalExpenses + showroomExpense - actualRemainingValue;
+    // =============================================================
 
     final result = totalDue - cashReceived;
 
@@ -943,6 +945,15 @@ class _ShowroomScreenState extends State<ShowroomScreen>
 
   // ---------- التبويب 4 ----------
   Widget _buildTab4() {
+    // حساب قيمة المدور عليه لليوم الحالي
+    double currentRemainingValue = 0;
+    for (var p in _products) {
+      final boxes = int.tryParse(_remainingBoxesCtrl[p.id]?.text ?? '0') ?? 0;
+      final pieces = int.tryParse(_remainingPiecesCtrl[p.id]?.text ?? '0') ?? 0;
+      final totalPieces = (boxes * _getBoxSize(p.id)) + pieces;
+      currentRemainingValue += totalPieces * _getRetailPrice(p.id);
+    }
+
     final showroomExpense = double.tryParse(_showroomExpenseCtrl.text) ?? 0;
     final cashReceived = double.tryParse(_cashReceivedCtrl.text) ?? 0;
     
@@ -951,13 +962,17 @@ class _ShowroomScreenState extends State<ShowroomScreen>
     final totalDueFromGoods = previousDue + goodsNet;
     
     final totalExpenses = _totalWorkerExpenses + _totalAdvances + _totalDailyExpenses + _totalSmallLedger;
-    final totalDue = totalDueFromGoods - totalExpenses + showroomExpense;
+    // ========== الإصلاح المحاسبي الوحيد: خصم المدور عليه ==========
+    final totalDue = totalDueFromGoods - totalExpenses + showroomExpense - currentRemainingValue;
+    // =============================================================
     final result = totalDue - cashReceived;
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(8),
       child: Column(
         children: [
+          _accountTile('📦 المدور عليه اليوم (بضاعة موجودة)', currentRemainingValue, bold: true, color: AppTheme.primaryColor),
+          const Divider(),
           _accountTile('مدور البضاعة السابق (+)', _prevRemainingValue, color: AppTheme.primaryColor),
           _accountTile('العجز / الزيادة السابقة (مستحق)', _prevResultAmount, color: _prevResultAmount > 0 ? AppTheme.errorColor : (_prevResultAmount < 0 ? AppTheme.successColor : null)),
           _accountTile('قيمة السحبيات (+)', _totalLoadValue, color: AppTheme.errorColor),
