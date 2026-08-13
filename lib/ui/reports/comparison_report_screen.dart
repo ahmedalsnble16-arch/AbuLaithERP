@@ -123,7 +123,7 @@ class _ComparisonReportScreenState extends State<ComparisonReportScreen> {
       _distributorOutByDistributor = map;
     }
 
-    // مرتجع المعرض
+    // مرتجع المعرض (فقط، بدون مرتجعات الموزعين)
     {
       final showroomReturn = await db.rawQuery('''
         SELECT product_id, COALESCE(SUM(ABS(quantity)), 0) as total
@@ -334,7 +334,6 @@ class _ComparisonReportScreenState extends State<ComparisonReportScreen> {
                   ),
                   const SizedBox(height: 16),
                   if (_hasRunComparison) ...[
-                    // قسم الصادر مع أعمدة الموزعين الفرعية
                     _buildOutgoingSection(),
                     const SizedBox(height: 16),
                     _buildIncomingSection(),
