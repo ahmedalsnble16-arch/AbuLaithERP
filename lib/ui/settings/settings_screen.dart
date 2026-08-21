@@ -31,6 +31,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _barcodeEnabled = false;
   bool _darkMode = false;
 
+  // إعدادات تسجيل الدخول
+  bool _loginRequired = false;
+  bool _biometricEnabled = false;
+
   // العملة والضرائب
   final _currencySymbolCtrl = TextEditingController();
   final _decimalPlacesCtrl = TextEditingController(text: '0');
@@ -95,6 +99,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _barcodeEnabled = settings['barcode_enabled'] == 'true';
     _darkMode = settings['dark_mode'] == 'true';
 
+    _loginRequired = settings['login_required'] == 'true';
+    _biometricEnabled = settings['biometric_enabled'] == 'true';
+
     _taxEnabled = settings['tax_enabled'] == 'true';
     _taxNameCtrl.text = settings['tax_name'] ?? 'ضريبة';
     _taxRateCtrl.text = settings['tax_rate'] ?? '0';
@@ -150,6 +157,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         'distributors_enabled': _distributorsEnabled.toString(),
         'barcode_enabled': _barcodeEnabled.toString(),
         'dark_mode': _darkMode.toString(),
+        'login_required': _loginRequired.toString(),
+        'biometric_enabled': _biometricEnabled.toString(),
         'currency_symbol': _currencySymbolCtrl.text.trim(),
         'decimal_places': _decimalPlacesCtrl.text.trim(),
         'tax_enabled': _taxEnabled.toString(),
@@ -171,10 +180,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
         'notify_production': _notifyProduction.toString(),
         'notify_sync_fail': _notifySyncFail.toString(),
       });
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('تم حفظ جميع الإعدادات'), backgroundColor: AppTheme.successColor),
         );
+
+        // إعادة التوجيه الفوري إذا تم تفعيل تسجيل الدخول
+        if (_loginRequired) {
+          Navigator.pushReplacementNamed(context, '/');
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -205,6 +220,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         'low_stock_threshold': '100', 'session_timeout': '30', 'negative_stock': 'false',
         'production_enabled': 'true', 'showroom_enabled': 'true', 'distributors_enabled': 'true',
         'barcode_enabled': 'false', 'tax_enabled': 'false', 'dark_mode': 'false',
+        'login_required': 'false', 'biometric_enabled': 'false',
         'currency_symbol': 'ر.ي', 'decimal_places': '0',
         'tax_name': 'ضريبة', 'tax_rate': '0', 'tax_included': 'false', 'show_tax_in_invoice': 'true',
         'auto_sync': 'false', 'sync_interval': '5', 'sync_on_wifi_only': 'true',
@@ -358,11 +374,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   _buildSection('🔐 إعدادات الأمان', [
                     TextField(controller: _sessionTimeoutCtrl, decoration: const InputDecoration(labelText: 'مدة الجلسة (دقيقة)'), keyboardType: TextInputType.number),
                   ]),
+
+                  // ============ قسم تسجيل الدخول ============
+                  _buildSection('🔐 تسجيل الدخول', [
+                    SwitchListTile(
+                      title: const Text('يتطلب تسجيل الدخول عند الفتح'),
+                      subtitle: const Text('إذا تم التفعيل، سيطلب التطبيق تسجيل الدخول عند كل فتح'),
+                      value: _loginRequired,
+                      onChanged: (v) => setState(() => _loginRequired = v),
+                    ),
+                    SwitchListTile(
+                      title: const Text('تسجيل الدخول بالبصمة/الوجه'),
+                      subtitle: const Text('يتطلب تفعيل تسجيل الدخول أولاً'),
+                      value: _biometricEnabled,
+                      onChanged: _loginRequired ? (v) => setState(() => _biometricEnabled = v) : null,
+                    ),
+                  ]),
+                  // ============================================
+
                   _buildSection('🎨 إعدادات الواجهة', [
                     SwitchListTile(title: const Text('الوضع الداكن'), value: _darkMode, onChanged: (v) => setState(() => _darkMode = v)),
                   ]),
 
-                  // ============ قسم المستخدمين والصلاحيات ============
                   _buildSection('👥 المستخدمون والصلاحيات', [
                     ListTile(
                       leading: const Icon(Icons.people, color: AppTheme.primaryColor),
@@ -387,7 +420,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                   ]),
 
-                  // الأقسام الجديدة
                   _buildSection('💱 العملة والضرائب', [
                     TextField(controller: _currencySymbolCtrl, decoration: const InputDecoration(labelText: 'رمز العملة')),
                     const SizedBox(height: 12),
@@ -427,7 +459,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     SwitchListTile(title: const Text('تنبيه الإنتاج'), subtitle: const Text('عند اكتمال دفعة إنتاج'), value: _notifyProduction, onChanged: (v) => setState(() => _notifyProduction = v)),
                     SwitchListTile(title: const Text('تنبيه فشل المزامنة'), value: _notifySyncFail, onChanged: (v) => setState(() => _notifySyncFail = v)),
                   ]),
-
                   _buildSection('💾 النسخ الاحتياطي', [
                     ListTile(
                       leading: const Icon(Icons.backup),
@@ -443,14 +474,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       }, child: const Text('استعادة')),
                     ),
                   ]),
-
                   _buildSection('🗄️ معلومات قاعدة البيانات', [
                     ListTile(title: const Text('اسم قاعدة البيانات'), subtitle: Text(_dbName)),
                     ListTile(title: const Text('عدد الجداول'), subtitle: Text('$_tablesCount')),
                     ListTile(title: const Text('عدد المستخدمين'), subtitle: Text('$_usersCount')),
                     ListTile(title: const Text('آخر نسخة احتياطية'), subtitle: Text(_lastBackup)),
                   ]),
-
                   _buildSection('📋 سجل العمليات', [
                     ListTile(
                       leading: const Icon(Icons.history),
@@ -459,7 +488,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       onTap: () => Navigator.pushNamed(context, '/audit'),
                     ),
                   ]),
-
                   _buildSection('⚙️ إعادة ضبط', [
                     ListTile(
                       leading: const Icon(Icons.restore, color: AppTheme.warningColor),
@@ -474,12 +502,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       onTap: _deleteAllData,
                     ),
                   ]),
-
                   _buildSection('ℹ️ معلومات النظام', [
                     ListTile(title: const Text('الإصدار'), subtitle: Text(AppConfig.appVersion)),
                     ListTile(title: const Text('اسم النظام'), subtitle: const Text('أبو ليث ERP')),
                   ]),
-
                   const SizedBox(height: 24),
                   SizedBox(
                     width: double.infinity,
