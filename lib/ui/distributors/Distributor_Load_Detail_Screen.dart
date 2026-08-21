@@ -584,6 +584,7 @@ class _DistributorLoadDetailScreenState extends State<DistributorLoadDetailScree
                             controller: _cashCtrl,
                             decoration: const InputDecoration(labelText: 'النقد المسلم', border: OutlineInputBorder()),
                             keyboardType: TextInputType.number,
+                            onChanged: (_) => setState(() {}),
                           ),
                           const SizedBox(height: 8),
                           ElevatedButton.icon(
