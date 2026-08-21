@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../core/constants/db_constants.dart';
 import '../../core/database/database_helper.dart';
 import '../../data/models/distributor.dart';
+import '../../data/repositories/distributor_repository.dart';
 import 'Distributor_Load_Detail_Screen.dart';
 
 class DistributorAccountScreen extends StatefulWidget {
@@ -13,12 +14,15 @@ class DistributorAccountScreen extends StatefulWidget {
 }
 
 class _DistributorAccountScreenState extends State<DistributorAccountScreen> {
+  final DistributorRepository _distRepo = DistributorRepository();
+  late Distributor _currentDistributor;
   List<Map<String, dynamic>> _loads = [];
   bool _isLoading = true;
 
   @override
   void initState() {
     super.initState();
+    _currentDistributor = widget.distributor;
     _loadLoads();
   }
 
@@ -28,10 +32,19 @@ class _DistributorAccountScreenState extends State<DistributorAccountScreen> {
     _loads = await db.query(
       DBConstants.tableDistributorLoads,
       where: 'distributor_id = ?',
-      whereArgs: [widget.distributor.id],
+      whereArgs: [_currentDistributor.id],
       orderBy: 'created_at DESC',
     );
     setState(() => _isLoading = false);
+  }
+
+  Future<void> _refreshDistributor() async {
+    final refreshed = await _distRepo.getById(_currentDistributor.id);
+    if (refreshed != null) {
+      setState(() {
+        _currentDistributor = refreshed;
+      });
+    }
   }
 
   Future<void> _createNewLoad() async {
@@ -39,7 +52,7 @@ class _DistributorAccountScreenState extends State<DistributorAccountScreen> {
     final loadId = DateTime.now().millisecondsSinceEpoch.toString();
     await db.insert(DBConstants.tableDistributorLoads, {
       'id': loadId,
-      'distributor_id': widget.distributor.id,
+      'distributor_id': _currentDistributor.id,
       'load_date': DateTime.now().toIso8601String().substring(0, 10),
       'status': 'مفتوحة',
       'created_at': DatabaseHelper.now,
@@ -51,7 +64,7 @@ class _DistributorAccountScreenState extends State<DistributorAccountScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('كشف حساب: ${widget.distributor.name}')),
+      appBar: AppBar(title: Text('كشف حساب: ${_currentDistributor.name}')),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : ListView.builder(
@@ -69,11 +82,13 @@ class _DistributorAccountScreenState extends State<DistributorAccountScreen> {
                         context,
                         MaterialPageRoute(
                           builder: (_) => DistributorLoadDetailScreen(
-                            distributor: widget.distributor,
+                            distributor: _currentDistributor,
                             loadId: load['id'] as String,
                           ),
                         ),
                       );
+                      // إعادة تحميل بيانات الموزع بعد العودة من تفاصيل الحملة
+                      await _refreshDistributor();
                       _loadLoads();
                     },
                   ),
