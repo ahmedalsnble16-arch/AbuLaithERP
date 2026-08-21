@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:local_auth/local_auth.dart';
 import '../../config/theme.dart';
 import '../../core/auth/session_manager.dart';
+import '../../core/auth/biometric_auth_service.dart';
 import '../../data/repositories/user_repository.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -14,14 +16,93 @@ class _LoginScreenState extends State<LoginScreen> {
   final _usernameController = TextEditingController(text: 'admin');
   final _passwordController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
+  final LocalAuthentication _localAuth = LocalAuthentication();
   bool _isLoading = false;
   bool _obscurePassword = true;
+  bool _biometricAvailable = false;
+  bool _hasSavedCredentials = false;
 
   @override
-  void dispose() {
-    _usernameController.dispose();
-    _passwordController.dispose();
-    super.dispose();
+  void initState() {
+    super.initState();
+    _checkBiometricAvailability();
+    _checkSavedCredentials();
+  }
+
+  Future<void> _checkBiometricAvailability() async {
+    try {
+      final canAuthenticate = await _localAuth.canCheckBiometrics;
+      final isDeviceSupported = await _localAuth.isDeviceSupported();
+      if (mounted) {
+        setState(() {
+          _biometricAvailable = canAuthenticate && isDeviceSupported;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _biometricAvailable = false);
+    }
+  }
+
+  Future<void> _checkSavedCredentials() async {
+    final (username, password) = await BiometricAuthService.getLastUser();
+    if (mounted) {
+      setState(() {
+        _hasSavedCredentials = username != null && password != null;
+      });
+    }
+  }
+
+  Future<void> _biometricLogin() async {
+    if (!_biometricAvailable) {
+      _showError('البصمة غير متوفرة على هذا الجهاز');
+      return;
+    }
+
+    if (!_hasSavedCredentials) {
+      _showError('لا توجد بيانات محفوظة. يرجى تسجيل الدخول بكلمة المرور أولاً.');
+      return;
+    }
+
+    try {
+      final authenticated = await _localAuth.authenticate(
+        localizedReason: 'تسجيل الدخول باستخدام البصمة أو الوجه',
+        options: const AuthenticationOptions(
+          biometricOnly: true,
+          stickyAuth: true,
+        ),
+      );
+
+      if (authenticated && mounted) {
+        setState(() => _isLoading = true);
+        final (username, password) = await BiometricAuthService.getLastUser();
+        
+        if (username == null || password == null) {
+          _showError('لا توجد بيانات محفوظة');
+          setState(() => _isLoading = false);
+          return;
+        }
+
+        final userRepo = UserRepository();
+        final user = await userRepo.login(username, password);
+
+        if (user != null) {
+          await SessionManager.saveUser(
+            id: user.id,
+            username: user.username,
+            role: user.roleId,
+          );
+          if (mounted) {
+            Navigator.pushReplacementNamed(context, '/dashboard');
+          }
+        } else {
+          _showError('فشل تسجيل الدخول بالبصمة - حاول بكلمة المرور');
+        }
+      }
+    } catch (e) {
+      _showError('خطأ في البصمة: $e');
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
   }
 
   Future<void> _login() async {
@@ -44,6 +125,12 @@ class _LoginScreenState extends State<LoginScreen> {
             id: user.id,
             username: user.username,
             role: user.roleId,
+          );
+
+          // حفظ بيانات المستخدم للاستخدام المستقبلي مع البصمة
+          await BiometricAuthService.saveLastUser(
+            _usernameController.text.trim(),
+            _passwordController.text.trim(),
           );
 
           if (!mounted) return;
@@ -72,6 +159,13 @@ class _LoginScreenState extends State<LoginScreen> {
         behavior: SnackBarBehavior.floating,
       ),
     );
+  }
+
+  @override
+  void dispose() {
+    _usernameController.dispose();
+    _passwordController.dispose();
+    super.dispose();
   }
 
   @override
@@ -110,6 +204,45 @@ class _LoginScreenState extends State<LoginScreen> {
                       style: TextStyle(fontSize: 14, color: Colors.white70),
                     ),
                     const SizedBox(height: 40),
+
+                    // زر البصمة (فقط إذا كانت متاحة وتوجد بيانات محفوظة)
+                    if (_biometricAvailable && _hasSavedCredentials)
+                      Card(
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                        elevation: 4,
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            children: [
+                              const Text(
+                                'تسجيل الدخول السريع',
+                                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                              ),
+                              const SizedBox(height: 12),
+                              SizedBox(
+                                width: double.infinity,
+                                height: 55,
+                                child: ElevatedButton.icon(
+                                  onPressed: _isLoading ? null : _biometricLogin,
+                                  icon: const Icon(Icons.fingerprint, size: 30),
+                                  label: const Text('البصمة / الوجه'),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: AppTheme.accentColor,
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              const Divider(),
+                              const SizedBox(height: 4),
+                              const Text('أو تسجيل الدخول بكلمة المرور', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                            ],
+                          ),
+                        ),
+                      ),
+
+                    const SizedBox(height: 16),
+
                     Card(
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                       elevation: 8,
