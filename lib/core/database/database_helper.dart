@@ -178,7 +178,6 @@ class DatabaseHelper {
       )
     ''');
 
-    // تمت إضافة عمود distributor_id
     await db.execute('''
       CREATE TABLE ${DBConstants.tableStockMovements} (
         id TEXT PRIMARY KEY,
@@ -531,7 +530,6 @@ class DatabaseHelper {
       )
     ''');
 
-    // جدول أسعار المنتجات للموزعين
     await db.execute('''
       CREATE TABLE IF NOT EXISTS ${DBConstants.tableDistributorProductPrices} (
         id TEXT PRIMARY KEY,
@@ -595,7 +593,6 @@ class DatabaseHelper {
       )
     ''');
 
-    // تمت إضافة عمود category هنا
     await db.execute('''
       CREATE TABLE IF NOT EXISTS showroom_daily_expenses (
         id TEXT PRIMARY KEY,
@@ -622,7 +619,6 @@ class DatabaseHelper {
       )
     ''');
 
-    // ============ جدول المتبقي اليومي ============
     await db.execute('''
       CREATE TABLE IF NOT EXISTS ${DBConstants.tableDailyRemaining} (
         id TEXT PRIMARY KEY,
@@ -640,7 +636,6 @@ class DatabaseHelper {
       )
     ''');
 
-    // ============ جدول العمال (مُحدث) ============
     await db.execute('''
       CREATE TABLE ${DBConstants.tableWorkers} (
         id TEXT PRIMARY KEY,
@@ -663,7 +658,6 @@ class DatabaseHelper {
       )
     ''');
 
-    // ============ جداول العمال الجديدة (الحضور والمصاريف اليومية) ============
     await db.execute('''
       CREATE TABLE IF NOT EXISTS worker_attendance (
         id TEXT PRIMARY KEY,
@@ -857,7 +851,6 @@ class DatabaseHelper {
       )
     ''');
 
-    // إدراج البيانات الأولية
     await _seedData(db);
   }
 
@@ -1081,6 +1074,19 @@ class DatabaseHelper {
         )
       ''');
     }
+    // إضافة الإعدادات الجديدة للإصدار 9
+    if (oldVersion < 9) {
+      await db.insert(DBConstants.tableSettings, {
+        'key': 'login_required',
+        'value': 'false',
+        'updated_at': DateTime.now().toIso8601String(),
+      });
+      await db.insert(DBConstants.tableSettings, {
+        'key': 'biometric_enabled',
+        'value': 'false',
+        'updated_at': DateTime.now().toIso8601String(),
+      });
+    }
   }
 
   Future<void> _seedData(Database db) async {
@@ -1142,7 +1148,6 @@ class DatabaseHelper {
       'updated_at': now,
     });
 
-    // تم تصحيح كلمة المرور إلى هاش
     await db.insert(DBConstants.tableUsers, {
       'id': 'user_admin_001',
       'full_name': 'مدير النظام',
@@ -1164,6 +1169,8 @@ class DatabaseHelper {
       'low_stock_threshold': '100',
       'session_timeout': '30',
       'app_version': '1.0.0',
+      'login_required': 'false',
+      'biometric_enabled': 'false',
     };
 
     for (var entry in defaultSettings.entries) {
