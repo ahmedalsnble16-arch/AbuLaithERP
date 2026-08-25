@@ -15,29 +15,19 @@ class _ProductionComparisonScreenState extends State<ProductionComparisonScreen>
   // بيانات المنتجات المستوردة من قاعدة البيانات
   List<Map<String, dynamic>> _products = [];
 
-  // متحكمات الإنتاج الفعلي
-  final Map<String, TextEditingController> _actualBoxesCtrl = {};
-  final Map<String, TextEditingController> _actualPiecesCtrl = {};
-  final Map<String, TextEditingController> _damagedCtrl = {};
-
-  // متحكمات الإنتاج المطلوب (الأطوار والقطع/طور)
+  // متحكمات الإنتاج المطلوب فقط (المدخلات اليدوية الوحيدة)
   final Map<String, TextEditingController> _phasesCtrl = {};
   final Map<String, TextEditingController> _piecesPerPhaseCtrl = {};
+
+  // بيانات الإنتاج الفعلي المستوردة تلقائياً
+  Map<String, int> _importedGoodPieces = {};
+  Map<String, int> _importedDamagedPieces = {};
 
   bool _isLoading = true;
   String _selectedDate = DateTime.now().toIso8601String().substring(0, 10);
   String _batchNumber = '';
   bool _comparisonCalculated = false;
   bool _batchApproved = false;
-
-  // بيانات تاريخية (تُستبدل بقاعدة البيانات لاحقاً)
-  final List<Map<String, dynamic>> _historicalBatches = [
-    {'date': '27/07', 'batch': 'B-0012', 'required': 8000, 'actual': 7960, 'lost': 40, 'damaged': 12, 'increase': 0},
-    {'date': '28/07', 'batch': 'B-0015', 'required': 7800, 'actual': 7620, 'lost': 180, 'damaged': 35, 'increase': 0},
-    {'date': '29/07', 'batch': 'B-0017', 'required': 8200, 'actual': 8210, 'lost': 0, 'damaged': 14, 'increase': 10},
-    {'date': '30/07', 'batch': 'B-0018', 'required': 8400, 'actual': 8390, 'lost': 10, 'damaged': 12, 'increase': 0},
-    {'date': '31/07', 'batch': 'B-0019', 'required': 8100, 'actual': 8125, 'lost': 0, 'damaged': 8, 'increase': 25},
-  ];
 
   @override
   void initState() {
@@ -54,21 +44,48 @@ class _ProductionComparisonScreenState extends State<ProductionComparisonScreen>
       _products = products;
       for (var p in products) {
         final id = p['id'] as String;
-        _actualBoxesCtrl[id] = TextEditingController(text: '0');
-        _actualPiecesCtrl[id] = TextEditingController(text: '0');
-        _damagedCtrl[id] = TextEditingController(text: '0');
         _phasesCtrl[id] = TextEditingController(text: '0');
         _piecesPerPhaseCtrl[id] = TextEditingController(text: '0');
+        _importedGoodPieces[id] = 0;
+        _importedDamagedPieces[id] = 0;
       }
       _isLoading = false;
+    });
+
+    // استيراد بيانات الإنتاج الفعلي تلقائياً
+    await _importProductionData();
+  }
+
+  /// استيراد الإنتاج السليم والتالف من جدول production_batches تلقائياً
+  Future<void> _importProductionData() async {
+    final db = await DatabaseHelper().database;
+
+    final batches = await db.query(
+      DBConstants.tableProductionBatches,
+      where: 'production_date = ? AND deleted = 0',
+      whereArgs: [_selectedDate],
+    );
+
+    final goodMap = <String, int>{};
+    final damagedMap = <String, int>{};
+
+    for (var batch in batches) {
+      final productId = batch['product_id'] as String;
+      final good = batch['good_pieces'] as int? ?? 0;
+      final damaged = batch['damaged_pieces'] as int? ?? 0;
+
+      goodMap[productId] = (goodMap[productId] ?? 0) + good;
+      damagedMap[productId] = (damagedMap[productId] ?? 0) + damaged;
+    }
+
+    setState(() {
+      _importedGoodPieces = goodMap;
+      _importedDamagedPieces = damagedMap;
     });
   }
 
   @override
   void dispose() {
-    for (var c in _actualBoxesCtrl.values) { c.dispose(); }
-    for (var c in _actualPiecesCtrl.values) { c.dispose(); }
-    for (var c in _damagedCtrl.values) { c.dispose(); }
     for (var c in _phasesCtrl.values) { c.dispose(); }
     for (var c in _piecesPerPhaseCtrl.values) { c.dispose(); }
     super.dispose();
@@ -81,13 +98,11 @@ class _ProductionComparisonScreenState extends State<ProductionComparisonScreen>
   }
 
   int _actualGoodPieces(String productId) {
-    final boxes = int.tryParse(_actualBoxesCtrl[productId]?.text ?? '0') ?? 0;
-    final pieces = int.tryParse(_actualPiecesCtrl[productId]?.text ?? '0') ?? 0;
-    return (boxes * _boxSize(productId)) + pieces;
+    return _importedGoodPieces[productId] ?? 0;
   }
 
   int _damagedPieces(String productId) {
-    return int.tryParse(_damagedCtrl[productId]?.text ?? '0') ?? 0;
+    return _importedDamagedPieces[productId] ?? 0;
   }
 
   int _requiredPiecesTotal(String productId) {
@@ -147,7 +162,16 @@ class _ProductionComparisonScreenState extends State<ProductionComparisonScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('مقارنة الإنتاجات وتحليل الضربات')),
+      appBar: AppBar(
+        title: const Text('مقارنة الإنتاجات وتحليل الضربات'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _importProductionData,
+            tooltip: 'إعادة استيراد بيانات الإنتاج',
+          ),
+        ],
+      ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : SingleChildScrollView(
@@ -165,7 +189,16 @@ class _ProductionComparisonScreenState extends State<ProductionComparisonScreen>
                           const SizedBox(height: 8),
                           Row(
                             children: [
-                              Expanded(child: TextField(decoration: const InputDecoration(labelText: 'التاريخ', hintText: 'YYYY-MM-DD'), controller: TextEditingController(text: _selectedDate), onChanged: (v) => _selectedDate = v)),
+                              Expanded(
+                                child: TextField(
+                                  decoration: const InputDecoration(labelText: 'التاريخ', hintText: 'YYYY-MM-DD'),
+                                  controller: TextEditingController(text: _selectedDate),
+                                  onSubmitted: (v) {
+                                    _selectedDate = v;
+                                    _importProductionData();
+                                  },
+                                ),
+                              ),
                               const SizedBox(width: 12),
                               const Expanded(child: TextField(decoration: InputDecoration(labelText: 'مسؤول الإنتاج'))),
                             ],
@@ -178,18 +211,10 @@ class _ProductionComparisonScreenState extends State<ProductionComparisonScreen>
 
                   // مؤشرات الأداء
                   _buildKPIs(),
-                  const SizedBox(height: 12),
-
-                  // أعلى وأقل ضربة
-                  _buildBestWorst(),
                   const SizedBox(height: 16),
 
                   // كشف المقارنة
                   _buildCurrentComparison(),
-                  const SizedBox(height: 16),
-
-                  // تحليل تاريخي
-                  _buildHistoricalSection(),
                 ],
               ),
             ),
@@ -202,12 +227,12 @@ class _ProductionComparisonScreenState extends State<ProductionComparisonScreen>
       spacing: 8,
       runSpacing: 8,
       children: [
-        _kpiCard('إجمالي الضربات', '${_historicalBatches.length}', AppTheme.primaryColor),
         _kpiCard('إجمالي المطلوب', '${_totalRequired}', AppTheme.textPrimaryColor),
-        _kpiCard('إجمالي الفعلي السليم', '${_totalActualGood}', AppTheme.textPrimaryColor),
-        _kpiCard('إجمالي الفاقد', '${_totalLost}', AppTheme.errorColor),
-        _kpiCard('إجمالي التالف', '${_totalDamaged}', AppTheme.warningColor),
-        _kpiCard('متوسط المطابقة', '${_avgMatch.toStringAsFixed(2)}%', AppTheme.successColor),
+        _kpiCard('إجمالي الفعلي السليم (مستورد)', '${_totalActualGood}', AppTheme.successColor),
+        _kpiCard('إجمالي التالف (مستورد)', '${_totalDamaged}', AppTheme.warningColor),
+        _kpiCard('الفاقد', '${_totalLost}', AppTheme.errorColor),
+        _kpiCard('الزيادة', '${_totalIncrease}', AppTheme.successColor),
+        _kpiCard('متوسط المطابقة', '${_avgMatch.toStringAsFixed(2)}%', AppTheme.primaryColor),
       ],
     );
   }
@@ -224,46 +249,6 @@ class _ProductionComparisonScreenState extends State<ProductionComparisonScreen>
           ],
         ),
       ),
-    );
-  }
-
-  // ============ أعلى وأقل ضربة ============
-  Widget _buildBestWorst() {
-    if (_historicalBatches.isEmpty) return const SizedBox.shrink();
-    final best = _historicalBatches.reduce((a, b) => (a['actual'] / a['required']) > (b['actual'] / b['required']) ? a : b);
-    final worst = _historicalBatches.reduce((a, b) => (a['actual'] / a['required']) < (b['actual'] / b['required']) ? a : b);
-    return Row(
-      children: [
-        Expanded(
-          child: Card(
-            color: AppTheme.successColor.withAlpha(20),
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                children: [
-                  const Text('🏆 أعلى ضربة', style: TextStyle(fontWeight: FontWeight.bold)),
-                  Text('${best['batch']} | ${((best['actual'] / best['required']) * 100).toStringAsFixed(2)}%'),
-                ],
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Card(
-            color: AppTheme.errorColor.withAlpha(20),
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                children: [
-                  const Text('⚠️ أقل ضربة', style: TextStyle(fontWeight: FontWeight.bold)),
-                  Text('${worst['batch']} | فاقد: ${worst['lost']} | تالف: ${worst['damaged']}'),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ],
     );
   }
 
@@ -286,22 +271,10 @@ class _ProductionComparisonScreenState extends State<ProductionComparisonScreen>
             const SizedBox(height: 16),
             if (_comparisonCalculated) _buildResultTable(),
             const SizedBox(height: 12),
-            Row(
-              children: [
-                ElevatedButton.icon(
-                  onPressed: _calculateComparison,
-                  icon: const Icon(Icons.calculate),
-                  label: const Text('حساب المقارنة'),
-                ),
-                const SizedBox(width: 8),
-                if (_comparisonCalculated && !_batchApproved)
-                  ElevatedButton.icon(
-                    onPressed: _approveBatch,
-                    icon: const Icon(Icons.check_circle),
-                    label: const Text('اعتماد الضربة'),
-                    style: ElevatedButton.styleFrom(backgroundColor: AppTheme.successColor),
-                  ),
-              ],
+            ElevatedButton.icon(
+              onPressed: _calculateComparison,
+              icon: const Icon(Icons.calculate),
+              label: const Text('حساب المقارنة'),
             ),
           ],
         ),
@@ -313,31 +286,35 @@ class _ProductionComparisonScreenState extends State<ProductionComparisonScreen>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('📤 الإنتاج الفعلي', style: TextStyle(fontWeight: FontWeight.bold, color: AppTheme.primaryColor)),
+        const Text('📤 الإنتاج الفعلي (مستورد تلقائياً)', style: TextStyle(fontWeight: FontWeight.bold, color: AppTheme.primaryColor)),
         const SizedBox(height: 8),
-        SingleChildScrollView(scrollDirection: Axis.horizontal, child: DataTable(
-          columns: const [
-            DataColumn(label: Text('المنتج')),
-            DataColumn(label: Text('سلة')),
-            DataColumn(label: Text('سلال')),
-            DataColumn(label: Text('قطع إضافية')),
-            DataColumn(label: Text('تالف')),
-            DataColumn(label: Text('سليم')),
-          ],
-          rows: _products.map((p) {
-            final id = p['id'] as String;
-            final boxSize = _boxSize(id);
-            final good = _actualGoodPieces(id);
-            return DataRow(cells: [
-              DataCell(Text(p['name'] ?? '')),
-              DataCell(Text('$boxSize')),
-              DataCell(SizedBox(width: 50, child: TextField(controller: _actualBoxesCtrl[id], keyboardType: TextInputType.number, onChanged: (_) => setState(() => _comparisonCalculated = false)))),
-              DataCell(SizedBox(width: 60, child: TextField(controller: _actualPiecesCtrl[id], keyboardType: TextInputType.number, onChanged: (_) => setState(() => _comparisonCalculated = false)))),
-              DataCell(SizedBox(width: 50, child: TextField(controller: _damagedCtrl[id], keyboardType: TextInputType.number, onChanged: (_) => setState(() => _comparisonCalculated = false)))),
-              DataCell(Text('$good', style: const TextStyle(fontWeight: FontWeight.bold))),
-            ]);
-          }).toList(),
-        )),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: DataTable(
+            columns: const [
+              DataColumn(label: Text('المنتج')),
+              DataColumn(label: Text('سلة')),
+              DataColumn(label: Text('سليم (سلال+قطع)')),
+              DataColumn(label: Text('سليم (قطع)')),
+              DataColumn(label: Text('تالف (سلال+قطع)')),
+              DataColumn(label: Text('تالف (قطع)')),
+            ],
+            rows: _products.map((p) {
+              final id = p['id'] as String;
+              final boxSize = _boxSize(id);
+              final good = _actualGoodPieces(id);
+              final damaged = _damagedPieces(id);
+              return DataRow(cells: [
+                DataCell(Text(p['name'] ?? '')),
+                DataCell(Text('$boxSize')),
+                DataCell(Text(_piecesToDisplay(good, boxSize), style: const TextStyle(fontWeight: FontWeight.bold, color: AppTheme.successColor))),
+                DataCell(Text('$good')),
+                DataCell(Text(_piecesToDisplay(damaged, boxSize), style: const TextStyle(fontWeight: FontWeight.bold, color: AppTheme.warningColor))),
+                DataCell(Text('$damaged')),
+              ]);
+            }).toList(),
+          ),
+        ),
       ],
     );
   }
@@ -346,30 +323,33 @@ class _ProductionComparisonScreenState extends State<ProductionComparisonScreen>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('📥 الإنتاج المطلوب', style: TextStyle(fontWeight: FontWeight.bold, color: AppTheme.primaryColor)),
+        const Text('📥 الإنتاج المطلوب (إدخال يدوي)', style: TextStyle(fontWeight: FontWeight.bold, color: AppTheme.primaryColor)),
         const SizedBox(height: 8),
-        SingleChildScrollView(scrollDirection: Axis.horizontal, child: DataTable(
-          columns: const [
-            DataColumn(label: Text('المنتج')),
-            DataColumn(label: Text('أطوار')),
-            DataColumn(label: Text('قطع/طور')),
-            DataColumn(label: Text('المطلوب (قطع)')),
-            DataColumn(label: Text('سلال مطلوبة')),
-          ],
-          rows: _products.map((p) {
-            final id = p['id'] as String;
-            final boxSize = _boxSize(id);
-            final required = _requiredPiecesTotal(id);
-            final reqDisplay = _piecesToDisplay(required, boxSize);
-            return DataRow(cells: [
-              DataCell(Text(p['name'] ?? '')),
-              DataCell(SizedBox(width: 50, child: TextField(controller: _phasesCtrl[id], keyboardType: TextInputType.number, onChanged: (_) => setState(() => _comparisonCalculated = false)))),
-              DataCell(SizedBox(width: 50, child: TextField(controller: _piecesPerPhaseCtrl[id], keyboardType: TextInputType.number, onChanged: (_) => setState(() => _comparisonCalculated = false)))),
-              DataCell(Text('$required', style: const TextStyle(fontWeight: FontWeight.bold))),
-              DataCell(Text(reqDisplay)),
-            ]);
-          }).toList(),
-        )),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: DataTable(
+            columns: const [
+              DataColumn(label: Text('المنتج')),
+              DataColumn(label: Text('أطوار')),
+              DataColumn(label: Text('قطع/طور')),
+              DataColumn(label: Text('المطلوب (قطع)')),
+              DataColumn(label: Text('سلال مطلوبة')),
+            ],
+            rows: _products.map((p) {
+              final id = p['id'] as String;
+              final boxSize = _boxSize(id);
+              final required = _requiredPiecesTotal(id);
+              final reqDisplay = _piecesToDisplay(required, boxSize);
+              return DataRow(cells: [
+                DataCell(Text(p['name'] ?? '')),
+                DataCell(SizedBox(width: 50, child: TextField(controller: _phasesCtrl[id], keyboardType: TextInputType.number, onChanged: (_) => setState(() {})))),
+                DataCell(SizedBox(width: 50, child: TextField(controller: _piecesPerPhaseCtrl[id], keyboardType: TextInputType.number, onChanged: (_) => setState(() {})))),
+                DataCell(Text('$required', style: const TextStyle(fontWeight: FontWeight.bold))),
+                DataCell(Text(reqDisplay)),
+              ]);
+            }).toList(),
+          ),
+        ),
       ],
     );
   }
@@ -381,131 +361,46 @@ class _ProductionComparisonScreenState extends State<ProductionComparisonScreen>
         const Divider(),
         const Text('📊 نتيجة المقارنة', style: TextStyle(fontWeight: FontWeight.bold, color: AppTheme.primaryColor)),
         const SizedBox(height: 8),
-        SingleChildScrollView(scrollDirection: Axis.horizontal, child: DataTable(
-          columns: const [
-            DataColumn(label: Text('المنتج')),
-            DataColumn(label: Text('الفعلي (سلال+قطع)')),
-            DataColumn(label: Text('المطلوب (سلال+قطع)')),
-            DataColumn(label: Text('الفرق')),
-            DataColumn(label: Text('الحالة')),
-          ],
-          rows: _products.map((p) {
-            final id = p['id'] as String;
-            final boxSize = _boxSize(id);
-            final actual = _actualGoodPieces(id);
-            final required = _requiredPiecesTotal(id);
-            final diff = actual - required;
-            String status; Color color;
-            if (diff > 0) { status = 'زيادة +$diff قطعة'; color = AppTheme.successColor; }
-            else if (diff < 0) { status = 'فاقد $diff قطعة'; color = AppTheme.errorColor; }
-            else { status = 'مطابق'; color = AppTheme.warningColor; }
-            return DataRow(cells: [
-              DataCell(Text(p['name'] ?? '')),
-              DataCell(Text(_piecesToDisplay(actual, boxSize))),
-              DataCell(Text(_piecesToDisplay(required, boxSize))),
-              DataCell(Text('${diff >= 0 ? "+$diff" : "$diff"}', style: TextStyle(fontWeight: FontWeight.bold, color: color))),
-              DataCell(Text(status, style: TextStyle(color: color))),
-            ]);
-          }).toList(),
-        )),
-        const SizedBox(height: 8),
-        Text('إجمالي المطلوب: $_totalRequired قطعة | إجمالي الفعلي السليم: $_totalActualGood قطعة | الفاقد: $_totalLost | التالف: $_totalDamaged | الزيادة: $_totalIncrease'),
-      ],
-    );
-  }
-
-  // ============ تحليل تاريخي ============
-  Widget _buildHistoricalSection() {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('📈 تحليل أداء الضربات', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 12),
-            SingleChildScrollView(scrollDirection: Axis.horizontal, child: DataTable(
-              columns: const [
-                DataColumn(label: Text('التاريخ')),
-                DataColumn(label: Text('الضربة')),
-                DataColumn(label: Text('المطلوب')),
-                DataColumn(label: Text('الفعلي')),
-                DataColumn(label: Text('الفاقد')),
-                DataColumn(label: Text('التالف')),
-                DataColumn(label: Text('الزيادة')),
-                DataColumn(label: Text('المطابقة')),
-              ],
-              rows: _historicalBatches.map((b) {
-                final match = ((b['actual'] / b['required']) * 100).toStringAsFixed(2);
-                return DataRow(cells: [
-                  DataCell(Text(b['date'])),
-                  DataCell(Text(b['batch'])),
-                  DataCell(Text('${b['required']}')),
-                  DataCell(Text('${b['actual']}')),
-                  DataCell(Text('${b['lost']}')),
-                  DataCell(Text('${b['damaged']}')),
-                  DataCell(Text('${b['increase']}')),
-                  DataCell(Text('$match%')),
-                ], onSelectChanged: (_) => _showBatchDetail(b));
-              }).toList(),
-            )),
-            const SizedBox(height: 16),
-            SizedBox(height: 200, child: _buildBarChart()),
-            const SizedBox(height: 16),
-            SizedBox(height: 200, child: _buildLineChart()),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _showBatchDetail(Map<String, dynamic> batch) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('تفاصيل الضربة ${batch['batch']}'),
-        content: Text('المطلوب: ${batch['required']}\nالفعلي: ${batch['actual']}\nالفاقد: ${batch['lost']}\nالتالف: ${batch['damaged']}'),
-        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إغلاق'))],
-      ),
-    );
-  }
-
-  Widget _buildBarChart() {
-    return BarChart(
-      BarChartData(
-        barGroups: _historicalBatches.asMap().entries.map((e) {
-          final i = e.key;
-          final b = e.value;
-          return BarChartGroupData(x: i, barRods: [
-            BarChartRodData(toY: b['required'].toDouble(), color: AppTheme.primaryColor, width: 6),
-            BarChartRodData(toY: b['actual'].toDouble(), color: AppTheme.successColor, width: 6),
-            BarChartRodData(toY: b['lost'].toDouble(), color: AppTheme.errorColor, width: 6),
-            BarChartRodData(toY: b['damaged'].toDouble(), color: AppTheme.warningColor, width: 6),
-          ]);
-        }).toList(),
-        titlesData: FlTitlesData(
-          bottomTitles: AxisTitles(sideTitles: SideTitles(showTitles: true, getTitlesWidget: (v, _) => Text(_historicalBatches[v.toInt()]['batch'], style: const TextStyle(fontSize: 10)))),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildLineChart() {
-    return LineChart(
-      LineChartData(
-        lineBarsData: [
-          LineChartBarData(
-            spots: _historicalBatches.asMap().entries.map((e) => FlSpot(e.key.toDouble(), ((e.value['actual'] / e.value['required']) * 100))).toList(),
-            isCurved: true,
-            color: AppTheme.primaryColor,
-            barWidth: 2,
-            dotData: FlDotData(show: true),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: DataTable(
+            columns: const [
+              DataColumn(label: Text('المنتج')),
+              DataColumn(label: Text('الفعلي (سلال+قطع)')),
+              DataColumn(label: Text('المطلوب (سلال+قطع)')),
+              DataColumn(label: Text('التالف')),
+              DataColumn(label: Text('الفرق')),
+              DataColumn(label: Text('الحالة')),
+            ],
+            rows: _products.map((p) {
+              final id = p['id'] as String;
+              final boxSize = _boxSize(id);
+              final actual = _actualGoodPieces(id);
+              final required = _requiredPiecesTotal(id);
+              final damaged = _damagedPieces(id);
+              final diff = actual - required;
+              String status;
+              Color color;
+              if (diff > 0) { status = 'زيادة +$diff قطعة'; color = AppTheme.successColor; }
+              else if (diff < 0) { status = 'فاقد ${diff.abs()} قطعة'; color = AppTheme.errorColor; }
+              else { status = 'مطابق'; color = AppTheme.warningColor; }
+              return DataRow(cells: [
+                DataCell(Text(p['name'] ?? '')),
+                DataCell(Text(_piecesToDisplay(actual, boxSize))),
+                DataCell(Text(_piecesToDisplay(required, boxSize))),
+                DataCell(Text('$damaged')),
+                DataCell(Text('${diff >= 0 ? "+$diff" : "$diff"}', style: TextStyle(fontWeight: FontWeight.bold, color: color))),
+                DataCell(Text(status, style: TextStyle(color: color))),
+              ]);
+            }).toList(),
           ),
-        ],
-        titlesData: FlTitlesData(
-          bottomTitles: AxisTitles(sideTitles: SideTitles(showTitles: true, getTitlesWidget: (v, _) => Text(_historicalBatches[v.toInt()]['batch'], style: const TextStyle(fontSize: 10)))),
         ),
-      ),
+        const SizedBox(height: 8),
+        Text(
+          'إجمالي المطلوب: $_totalRequired قطعة | إجمالي الفعلي السليم: $_totalActualGood قطعة | الفاقد: $_totalLost | التالف: $_totalDamaged | الزيادة: $_totalIncrease',
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
+      ],
     );
   }
 }
