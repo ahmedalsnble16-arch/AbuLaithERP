@@ -1,5 +1,5 @@
 // lib/core/database/database_helper.dart
-import 'package0:sqflite/sqflite.dart';
+import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import '../../config/app_config.dart';
 import '../../core/constants/db_constants.dart';
