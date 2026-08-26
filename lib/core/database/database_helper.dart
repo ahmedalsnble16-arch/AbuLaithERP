@@ -645,6 +645,7 @@ class DatabaseHelper {
         salary REAL DEFAULT 0,
         daily_salary REAL DEFAULT 0,
         daily_expense REAL DEFAULT 0,
+        monthly_withdrawal_limit REAL DEFAULT 0,
         card_number TEXT,
         card_image TEXT,
         hire_date TEXT,
@@ -898,6 +899,36 @@ class DatabaseHelper {
       )
     ''');
 
+    // ============ جداول الإصلاحات ============
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS ${DBConstants.tableRepairTypes} (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS ${DBConstants.tableRepairs} (
+        id TEXT PRIMARY KEY,
+        repair_type TEXT NOT NULL,
+        description TEXT NOT NULL,
+        amount REAL NOT NULL,
+        repair_date TEXT NOT NULL,
+        repair_time TEXT,
+        notes TEXT,
+        created_by TEXT,
+        treasury_transaction_id TEXT,
+        status TEXT DEFAULT 'معتمدة',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        device_id TEXT,
+        sync_status TEXT DEFAULT 'Pending',
+        deleted INTEGER DEFAULT 0
+      )
+    ''');
+
     await _seedData(db);
   }
 
@@ -1133,7 +1164,6 @@ class DatabaseHelper {
         'updated_at': DateTime.now().toIso8601String(),
       });
     }
-    // إضافة جداول الشركاء للإصدار 10
     if (oldVersion < 10) {
       await db.execute('''
         CREATE TABLE IF NOT EXISTS ${DBConstants.tablePartners} (
@@ -1180,6 +1210,55 @@ class DatabaseHelper {
           FOREIGN KEY (partner_id) REFERENCES ${DBConstants.tablePartners}(id)
         )
       ''');
+    }
+    // إضافة عمود الحد الشهري للسحب (الإصدار 11)
+    if (oldVersion < 11) {
+      await db.execute(
+        'ALTER TABLE ${DBConstants.tableWorkers} ADD COLUMN monthly_withdrawal_limit REAL DEFAULT 0'
+      );
+    }
+    // إضافة جداول الإصلاحات (الإصدار 12)
+    if (oldVersion < 12) {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS ${DBConstants.tableRepairTypes} (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL UNIQUE,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+      ''');
+
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS ${DBConstants.tableRepairs} (
+          id TEXT PRIMARY KEY,
+          repair_type TEXT NOT NULL,
+          description TEXT NOT NULL,
+          amount REAL NOT NULL,
+          repair_date TEXT NOT NULL,
+          repair_time TEXT,
+          notes TEXT,
+          created_by TEXT,
+          treasury_transaction_id TEXT,
+          status TEXT DEFAULT 'معتمدة',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          device_id TEXT,
+          sync_status TEXT DEFAULT 'Pending',
+          deleted INTEGER DEFAULT 0
+        )
+      ''');
+
+      // إدراج أنواع الإصلاحات الافتراضية
+      final now = DateTime.now().toIso8601String();
+      final defaultTypes = ['إصلاح معدات', 'إصلاح أدوات', 'إصلاح أجهزة', 'إصلاح كهرباء', 'إصلاح سباكة', 'صيانة', 'تطوير المحل', 'تطوير المعمل', 'شراء/تركيب', 'أخرى'];
+      for (var type in defaultTypes) {
+        await db.insert(DBConstants.tableRepairTypes, {
+          'id': 'type_${type.hashCode}',
+          'name': type,
+          'created_at': now,
+          'updated_at': now,
+        });
+      }
     }
   }
 
@@ -1271,6 +1350,17 @@ class DatabaseHelper {
       await db.insert(DBConstants.tableSettings, {
         'key': entry.key,
         'value': entry.value,
+        'updated_at': now,
+      });
+    }
+
+    // إدراج أنواع الإصلاحات الافتراضية في _seedData
+    final defaultRepairTypes = ['إصلاح معدات', 'إصلاح أدوات', 'إصلاح أجهزة', 'إصلاح كهرباء', 'إصلاح سباكة', 'صيانة', 'تطوير المحل', 'تطوير المعمل', 'شراء/تركيب', 'أخرى'];
+    for (var type in defaultRepairTypes) {
+      await db.insert(DBConstants.tableRepairTypes, {
+        'id': 'type_${type.hashCode}',
+        'name': type,
+        'created_at': now,
         'updated_at': now,
       });
     }
