@@ -6,7 +6,7 @@ class AppConfig {
   static const String currency = 'ريال يمني';
   static const String currencySymbol = 'ر.ي';
   static const String dbName = 'abu_laith_erp.db';
-  static const int dbVersion = 8; // تم تغييره من 2 إلى 8 ليشمل جميع تحديثات قاعدة البيانات
+  static const int dbVersion = 13; // تم تغييره من 2 إلى 8 ليشمل جميع تحديثات قاعدة البيانات
   static const int sessionTimeout = 30;
   static const int maxLoginAttempts = 5;
   static const String syncInterval = '5';
