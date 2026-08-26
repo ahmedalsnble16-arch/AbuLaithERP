@@ -851,6 +851,53 @@ class DatabaseHelper {
       )
     ''');
 
+    // ============ جداول الشركاء المالكين ============
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS ${DBConstants.tablePartners} (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        phone TEXT,
+        address TEXT,
+        ownership_percent REAL DEFAULT 0,
+        partnership_start_date TEXT,
+        active INTEGER DEFAULT 1,
+        monthly_salary REAL DEFAULT 0,
+        salary_due_day INTEGER DEFAULT 1,
+        max_withdrawal_limit REAL DEFAULT 0,
+        notes TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        created_by TEXT,
+        device_id TEXT,
+        sync_status TEXT DEFAULT 'Pending',
+        deleted INTEGER DEFAULT 0
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS ${DBConstants.tablePartnerTransactions} (
+        id TEXT PRIMARY KEY,
+        partner_id TEXT NOT NULL,
+        transaction_type TEXT NOT NULL,
+        amount REAL NOT NULL,
+        description TEXT,
+        transaction_date TEXT NOT NULL,
+        transaction_time TEXT,
+        month INTEGER,
+        year INTEGER,
+        salary_status TEXT,
+        paid_amount REAL DEFAULT 0,
+        remaining_amount REAL DEFAULT 0,
+        treasury_transaction_id TEXT,
+        reference_id TEXT,
+        created_at TEXT NOT NULL,
+        created_by TEXT,
+        device_id TEXT,
+        sync_status TEXT DEFAULT 'Pending',
+        FOREIGN KEY (partner_id) REFERENCES ${DBConstants.tablePartners}(id)
+      )
+    ''');
+
     await _seedData(db);
   }
 
@@ -1074,7 +1121,6 @@ class DatabaseHelper {
         )
       ''');
     }
-    // إضافة الإعدادات الجديدة للإصدار 9
     if (oldVersion < 9) {
       await db.insert(DBConstants.tableSettings, {
         'key': 'login_required',
@@ -1086,6 +1132,54 @@ class DatabaseHelper {
         'value': 'false',
         'updated_at': DateTime.now().toIso8601String(),
       });
+    }
+    // إضافة جداول الشركاء للإصدار 10
+    if (oldVersion < 10) {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS ${DBConstants.tablePartners} (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          phone TEXT,
+          address TEXT,
+          ownership_percent REAL DEFAULT 0,
+          partnership_start_date TEXT,
+          active INTEGER DEFAULT 1,
+          monthly_salary REAL DEFAULT 0,
+          salary_due_day INTEGER DEFAULT 1,
+          max_withdrawal_limit REAL DEFAULT 0,
+          notes TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          created_by TEXT,
+          device_id TEXT,
+          sync_status TEXT DEFAULT 'Pending',
+          deleted INTEGER DEFAULT 0
+        )
+      ''');
+
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS ${DBConstants.tablePartnerTransactions} (
+          id TEXT PRIMARY KEY,
+          partner_id TEXT NOT NULL,
+          transaction_type TEXT NOT NULL,
+          amount REAL NOT NULL,
+          description TEXT,
+          transaction_date TEXT NOT NULL,
+          transaction_time TEXT,
+          month INTEGER,
+          year INTEGER,
+          salary_status TEXT,
+          paid_amount REAL DEFAULT 0,
+          remaining_amount REAL DEFAULT 0,
+          treasury_transaction_id TEXT,
+          reference_id TEXT,
+          created_at TEXT NOT NULL,
+          created_by TEXT,
+          device_id TEXT,
+          sync_status TEXT DEFAULT 'Pending',
+          FOREIGN KEY (partner_id) REFERENCES ${DBConstants.tablePartners}(id)
+        )
+      ''');
     }
   }
 
