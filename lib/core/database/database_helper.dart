@@ -929,6 +929,42 @@ class DatabaseHelper {
       )
     ''');
 
+    // ============ الجداول الجديدة المطلوبة ============
+    // جدول التكوينات الديناميكية
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS dynamic_configurations (
+        id TEXT PRIMARY KEY,
+        element_type TEXT NOT NULL,
+        element_name TEXT NOT NULL,
+        display_order INTEGER DEFAULT 0,
+        page_location TEXT,
+        data_type TEXT,
+        settings TEXT,
+        permissions TEXT,
+        affects_treasury INTEGER DEFAULT 0,
+        active INTEGER DEFAULT 1,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        created_by TEXT,
+        sync_status TEXT DEFAULT 'Pending',
+        deleted INTEGER DEFAULT 0
+      )
+    ''');
+
+    // جدول أرشيف النظام
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS system_archives (
+        id TEXT PRIMARY KEY,
+        source_table TEXT NOT NULL,
+        source_record_id TEXT NOT NULL,
+        archive_data TEXT NOT NULL,
+        archive_date TEXT NOT NULL,
+        archived_by TEXT,
+        notes TEXT,
+        created_at TEXT NOT NULL
+      )
+    ''');
+
     await _seedData(db);
   }
 
@@ -1260,6 +1296,124 @@ class DatabaseHelper {
         });
       }
     }
+
+    // ============ إضافة الجداول الجديدة (الإصدار 13) ============
+    if (oldVersion < 13) {
+      // جدول التكوينات الديناميكية
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS dynamic_configurations (
+          id TEXT PRIMARY KEY,
+          element_type TEXT NOT NULL,
+          element_name TEXT NOT NULL,
+          display_order INTEGER DEFAULT 0,
+          page_location TEXT,
+          data_type TEXT,
+          settings TEXT,
+          permissions TEXT,
+          affects_treasury INTEGER DEFAULT 0,
+          active INTEGER DEFAULT 1,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          created_by TEXT,
+          sync_status TEXT DEFAULT 'Pending',
+          deleted INTEGER DEFAULT 0
+        )
+      ''');
+
+      // جدول أرشيف النظام
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS system_archives (
+          id TEXT PRIMARY KEY,
+          source_table TEXT NOT NULL,
+          source_record_id TEXT NOT NULL,
+          archive_data TEXT NOT NULL,
+          archive_date TEXT NOT NULL,
+          archived_by TEXT,
+          notes TEXT,
+          created_at TEXT NOT NULL
+        )
+      ''');
+
+      // إدراج بيانات افتراضية للتكوينات الديناميكية
+      final now = DateTime.now().toIso8601String();
+      
+      final dynamicConfigs = [
+        {
+          'id': 'config_damage_returns',
+          'element_type': 'damage_return',
+          'element_name': 'تلف ومرتجعات الموزعين',
+          'display_order': 1,
+          'page_location': 'distributor_settlement',
+          'data_type': 'boolean',
+          'settings': '{"enabled": true, "allow_damage": true, "allow_returns": true}',
+          'permissions': '["view_damage", "edit_damage"]',
+          'affects_treasury': 1,
+          'active': 1,
+          'created_at': now,
+          'updated_at': now,
+        },
+        {
+          'id': 'config_showroom_daily',
+          'element_type': 'showroom_daily',
+          'element_name': 'الحساب اليومي للمعرض',
+          'display_order': 2,
+          'page_location': 'showroom_daily',
+          'data_type': 'object',
+          'settings': '{"enable_expenses": true, "enable_khat": true}',
+          'permissions': '["view_showroom", "edit_showroom"]',
+          'affects_treasury': 1,
+          'active': 1,
+          'created_at': now,
+          'updated_at': now,
+        },
+        {
+          'id': 'config_production_batches',
+          'element_type': 'production',
+          'element_name': 'دفعات الإنتاج',
+          'display_order': 3,
+          'page_location': 'production',
+          'data_type': 'object',
+          'settings': '{"auto_calculate": true, "allow_manual": true}',
+          'permissions': '["view_production", "edit_production"]',
+          'affects_treasury': 0,
+          'active': 1,
+          'created_at': now,
+          'updated_at': now,
+        },
+        {
+          'id': 'config_repairs',
+          'element_type': 'repairs',
+          'element_name': 'الإصلاحات والصيانة',
+          'display_order': 4,
+          'page_location': 'repairs',
+          'data_type': 'object',
+          'settings': '{"allow_multiple_types": true, "require_approval": true}',
+          'permissions': '["view_repairs", "edit_repairs"]',
+          'affects_treasury': 1,
+          'active': 1,
+          'created_at': now,
+          'updated_at': now,
+        },
+        {
+          'id': 'config_partners',
+          'element_type': 'partners',
+          'element_name': 'الشركاء المالكين',
+          'display_order': 5,
+          'page_location': 'partners',
+          'data_type': 'object',
+          'settings': '{"enable_salary": true, "enable_withdrawal": true}',
+          'permissions': '["view_partners", "edit_partners"]',
+          'affects_treasury': 1,
+          'active': 1,
+          'created_at': now,
+          'updated_at': now,
+        },
+      ];
+
+      for (var config in dynamicConfigs) {
+        await db.insert('dynamic_configurations', config);
+      }
+    }
   }
 
   Future<void> _seedData(Database db) async {
@@ -1354,7 +1508,7 @@ class DatabaseHelper {
       });
     }
 
-    // إدراج أنواع الإصلاحات الافتراضية في _seedData
+    // إدراج أنواع الإصلاحات الافتراضية
     final defaultRepairTypes = ['إصلاح معدات', 'إصلاح أدوات', 'إصلاح أجهزة', 'إصلاح كهرباء', 'إصلاح سباكة', 'صيانة', 'تطوير المحل', 'تطوير المعمل', 'شراء/تركيب', 'أخرى'];
     for (var type in defaultRepairTypes) {
       await db.insert(DBConstants.tableRepairTypes, {
@@ -1363,6 +1517,84 @@ class DatabaseHelper {
         'created_at': now,
         'updated_at': now,
       });
+    }
+
+    // إدراج بيانات التكوينات الديناميكية الافتراضية
+    final dynamicConfigs = [
+      {
+        'id': 'config_damage_returns',
+        'element_type': 'damage_return',
+        'element_name': 'تلف ومرتجعات الموزعين',
+        'display_order': 1,
+        'page_location': 'distributor_settlement',
+        'data_type': 'boolean',
+        'settings': '{"enabled": true, "allow_damage": true, "allow_returns": true}',
+        'permissions': '["view_damage", "edit_damage"]',
+        'affects_treasury': 1,
+        'active': 1,
+        'created_at': now,
+        'updated_at': now,
+      },
+      {
+        'id': 'config_showroom_daily',
+        'element_type': 'showroom_daily',
+        'element_name': 'الحساب اليومي للمعرض',
+        'display_order': 2,
+        'page_location': 'showroom_daily',
+        'data_type': 'object',
+        'settings': '{"enable_expenses": true, "enable_khat": true}',
+        'permissions': '["view_showroom", "edit_showroom"]',
+        'affects_treasury': 1,
+        'active': 1,
+        'created_at': now,
+        'updated_at': now,
+      },
+      {
+        'id': 'config_production_batches',
+        'element_type': 'production',
+        'element_name': 'دفعات الإنتاج',
+        'display_order': 3,
+        'page_location': 'production',
+        'data_type': 'object',
+        'settings': '{"auto_calculate": true, "allow_manual": true}',
+        'permissions': '["view_production", "edit_production"]',
+        'affects_treasury': 0,
+        'active': 1,
+        'created_at': now,
+        'updated_at': now,
+      },
+      {
+        'id': 'config_repairs',
+        'element_type': 'repairs',
+        'element_name': 'الإصلاحات والصيانة',
+        'display_order': 4,
+        'page_location': 'repairs',
+        'data_type': 'object',
+        'settings': '{"allow_multiple_types": true, "require_approval": true}',
+        'permissions': '["view_repairs", "edit_repairs"]',
+        'affects_treasury': 1,
+        'active': 1,
+        'created_at': now,
+        'updated_at': now,
+      },
+      {
+        'id': 'config_partners',
+        'element_type': 'partners',
+        'element_name': 'الشركاء المالكين',
+        'display_order': 5,
+        'page_location': 'partners',
+        'data_type': 'object',
+        'settings': '{"enable_salary": true, "enable_withdrawal": true}',
+        'permissions': '["view_partners", "edit_partners"]',
+        'affects_treasury': 1,
+        'active': 1,
+        'created_at': now,
+        'updated_at': now,
+      },
+    ];
+
+    for (var config in dynamicConfigs) {
+      await db.insert('dynamic_configurations', config);
     }
   }
 
