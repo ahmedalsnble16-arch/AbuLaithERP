@@ -8,15 +8,20 @@ import '../raw_materials/materials_screen.dart';
 import '../production/production_screen.dart';
 import '../warehouse/warehouse_screen.dart';
 import '../showroom/showroom_screen.dart';
+import '../showroom/sale_screen.dart';
 import '../treasury/treasury_screen.dart';
 import '../expenses/expenses_screen.dart';
 import '../distributors/distributors_screen.dart';
+import '../distributors/all_loads_screen.dart';
 import '../reports/reports_menu_screen.dart';
+import '../reports/comparison_report_screen.dart';
 import '../sync/sync_screen.dart';
 import '../customers/customers_screen.dart';
 import '../suppliers/suppliers_screen.dart';
 import '../purchases/purchases_screen.dart';
 import '../workers/workers_screen.dart';
+import '../partners/partners_screen.dart';
+import '../repairs/repairs_screen.dart';
 import '../settings/settings_screen.dart';
 import '../audit/audit_log_screen.dart';
 import '../backup/backup_screen.dart';
@@ -56,7 +61,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ''');
       _balance = (balanceResult.first['balance'] as num?)?.toDouble() ?? 0.0;
 
-      // قيمة المخزون (عدد القطع)
+      // قيمة المخزون
       final stockResult = await db.rawQuery('''
         SELECT COALESCE(SUM(quantity_pieces), 0) as total
         FROM ${DBConstants.tableStock}
@@ -84,7 +89,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final auditLogs = await db.query(
         DBConstants.tableAuditLogs,
         orderBy: 'created_at DESC',
-        limit: 5,
+        limit: 8,
       );
       _recentActivities = auditLogs;
 
@@ -92,7 +97,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final userData = await SessionManager.getUser();
       _username = userData['username'] ?? 'المستخدم';
     } catch (e) {
-      // في حال وجود خطأ، تبقى القيم الافتراضية
+      debugPrint('Error loading dashboard: $e');
     }
     setState(() => _isLoading = false);
   }
@@ -135,8 +140,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     // بطاقة الترحيب
                     Card(
                       elevation: 2,
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12)),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       child: Padding(
                         padding: const EdgeInsets.all(16),
                         child: Row(
@@ -144,24 +148,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             const CircleAvatar(
                               radius: 28,
                               backgroundColor: AppTheme.primaryColor,
-                              child: Icon(Icons.person,
-                                  size: 32, color: Colors.white),
+                              child: Icon(Icons.person, size: 32, color: Colors.white),
                             ),
                             const SizedBox(width: 16),
                             Expanded(
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text(
-                                    'مرحباً $_username',
-                                    style: const TextStyle(
-                                        fontSize: 18,
-                                        fontWeight: FontWeight.bold),
-                                  ),
+                                  Text('مرحباً $_username',
+                                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                                   const SizedBox(height: 4),
                                   const Text('مدير النظام',
-                                      style: TextStyle(
-                                          color: AppTheme.textSecondaryColor)),
+                                      style: TextStyle(color: AppTheme.textSecondaryColor)),
                                 ],
                               ),
                             ),
@@ -193,9 +191,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     const SizedBox(height: 20),
 
                     // الوصول السريع
-                    const Text('الوصول السريع',
-                        style: TextStyle(
-                            fontSize: 18, fontWeight: FontWeight.bold)),
+                    const Text('الوصول السريع', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                     const SizedBox(height: 12),
                     GridView.count(
                       shrinkWrap: true,
@@ -205,72 +201,70 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       mainAxisSpacing: 8,
                       childAspectRatio: 1.0,
                       children: [
-                        _buildQuickCard(Icons.inventory_2, 'المنتجات',
-                            AppTheme.primaryColor, () {
+                        _buildQuickCard(Icons.inventory_2, 'المنتجات', AppTheme.primaryColor, () {
                           Navigator.push(context, MaterialPageRoute(builder: (_) => const ProductsScreen()));
                         }),
-                        _buildQuickCard(Icons.grain, 'المواد الخام',
-                            Colors.brown, () {
+                        _buildQuickCard(Icons.grain, 'المواد الخام', Colors.brown, () {
                           Navigator.push(context, MaterialPageRoute(builder: (_) => const MaterialsScreen()));
                         }),
-                        _buildQuickCard(Icons.factory, 'الإنتاج',
-                            Colors.deepOrange, () {
+                        _buildQuickCard(Icons.factory, 'الإنتاج', Colors.deepOrange, () {
                           Navigator.push(context, MaterialPageRoute(builder: (_) => const ProductionScreen()));
                         }),
-                        _buildQuickCard(Icons.warehouse, 'المخزن',
-                            AppTheme.primaryColor, () {
+                        _buildQuickCard(Icons.warehouse, 'المخزن', AppTheme.primaryColor, () {
                           Navigator.push(context, MaterialPageRoute(builder: (_) => const WarehouseScreen()));
                         }),
-                        _buildQuickCard(Icons.store, 'المعرض',
-                            Colors.teal, () {
+                        _buildQuickCard(Icons.store, 'المعرض', Colors.teal, () {
                           Navigator.push(context, MaterialPageRoute(builder: (_) => const ShowroomScreen()));
                         }),
-                        _buildQuickCard(Icons.account_balance_wallet, 'الخزنة',
-                            Colors.green, () {
+                        _buildQuickCard(Icons.shopping_cart, 'فاتورة بيع', Colors.green, () {
+                          Navigator.push(context, MaterialPageRoute(builder: (_) => const SaleScreen()));
+                        }),
+                        _buildQuickCard(Icons.account_balance_wallet, 'الخزنة', Colors.green, () {
                           Navigator.push(context, MaterialPageRoute(builder: (_) => const TreasuryScreen()));
                         }),
-                        _buildQuickCard(Icons.money_off, 'المصروفات',
-                            Colors.orange, () {
+                        _buildQuickCard(Icons.money_off, 'المصروفات', Colors.orange, () {
                           Navigator.push(context, MaterialPageRoute(builder: (_) => const ExpensesScreen()));
                         }),
-                        _buildQuickCard(Icons.local_shipping, 'الموزعون',
-                            Colors.indigo, () {
+                        _buildQuickCard(Icons.local_shipping, 'الموزعون', Colors.indigo, () {
                           Navigator.push(context, MaterialPageRoute(builder: (_) => const DistributorsScreen()));
                         }),
-                        _buildQuickCard(Icons.assessment, 'التقارير',
-                            Colors.purple, () {
+                        _buildQuickCard(Icons.receipt_long, 'جدول الحملات', Colors.teal, () {
+                          Navigator.push(context, MaterialPageRoute(builder: (_) => const AllLoadsScreen()));
+                        }),
+                        _buildQuickCard(Icons.compare_arrows, 'كشف المقارنة', Colors.cyan, () {
+                          Navigator.push(context, MaterialPageRoute(builder: (_) => const ComparisonReportScreen()));
+                        }),
+                        _buildQuickCard(Icons.assessment, 'التقارير', Colors.purple, () {
                           Navigator.push(context, MaterialPageRoute(builder: (_) => const ReportsMenuScreen()));
                         }),
-                        _buildQuickCard(Icons.people, 'العملاء',
-                            Colors.blue, () {
+                        _buildQuickCard(Icons.people, 'العملاء', Colors.blue, () {
                           Navigator.push(context, MaterialPageRoute(builder: (_) => const CustomersScreen()));
                         }),
-                        _buildQuickCard(Icons.business, 'الموردين',
-                            Colors.deepPurple, () {
+                        _buildQuickCard(Icons.business, 'الموردين', Colors.deepPurple, () {
                           Navigator.push(context, MaterialPageRoute(builder: (_) => const SuppliersScreen()));
                         }),
-                        _buildQuickCard(Icons.shopping_cart, 'المشتريات',
-                            Colors.blueGrey, () {
+                        _buildQuickCard(Icons.shopping_cart, 'المشتريات', Colors.blueGrey, () {
                           Navigator.push(context, MaterialPageRoute(builder: (_) => const PurchasesScreen()));
                         }),
-                        _buildQuickCard(Icons.badge, 'العمال',
-                            Colors.lightBlue, () {
+                        _buildQuickCard(Icons.badge, 'العمال', Colors.lightBlue, () {
                           Navigator.push(context, MaterialPageRoute(builder: (_) => const WorkersScreen()));
                         }),
-                        _buildQuickCard(Icons.sync, 'المزامنة',
-                            Colors.cyan, () {
+                        _buildQuickCard(Icons.handshake, 'الشركاء', Colors.amber, () {
+                          Navigator.push(context, MaterialPageRoute(builder: (_) => const PartnersScreen()));
+                        }),
+                        _buildQuickCard(Icons.build, 'الإصلاحات', AppTheme.warningColor, () {
+                          Navigator.push(context, MaterialPageRoute(builder: (_) => const RepairsScreen()));
+                        }),
+                        _buildQuickCard(Icons.sync, 'المزامنة', Colors.cyan, () {
                           Navigator.push(context, MaterialPageRoute(builder: (_) => const SyncScreen()));
                         }),
-                        _buildQuickCard(Icons.settings, 'الإعدادات',
-                            Colors.grey, () {
+                        _buildQuickCard(Icons.settings, 'الإعدادات', Colors.grey, () {
                           Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen()));
                         }),
-                        _buildQuickCard(Icons.history, 'سجل العمليات',
-                            AppTheme.textSecondaryColor, () {
+                        _buildQuickCard(Icons.history, 'سجل العمليات', AppTheme.textSecondaryColor, () {
                           Navigator.push(context, MaterialPageRoute(builder: (_) => const AuditLogScreen()));
                         }),
-                        _buildQuickCard(Icons.backup, 'نسخ احتياطي',
-                            AppTheme.warningColor, () {
+                        _buildQuickCard(Icons.backup, 'نسخ احتياطي', AppTheme.warningColor, () {
                           Navigator.push(context, MaterialPageRoute(builder: (_) => const BackupScreen()));
                         }),
                       ],
@@ -278,9 +272,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     const SizedBox(height: 20),
 
                     // آخر العمليات
-                    const Text('آخر العمليات',
-                        style: TextStyle(
-                            fontSize: 18, fontWeight: FontWeight.bold)),
+                    const Text('آخر العمليات', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                     const SizedBox(height: 12),
                     if (_recentActivities.isEmpty)
                       const Card(
@@ -291,8 +283,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       )
                     else
                       Card(
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12)),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                         child: SingleChildScrollView(
                           scrollDirection: Axis.horizontal,
                           child: DataTable(
@@ -342,14 +333,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Text(value,
-                      style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: color)),
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: color)),
                   const SizedBox(height: 2),
                   Text(title,
-                      style: const TextStyle(
-                          fontSize: 12, color: AppTheme.textSecondaryColor)),
+                      style: const TextStyle(fontSize: 12, color: AppTheme.textSecondaryColor)),
                 ],
               ),
             ),
@@ -379,8 +366,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               const SizedBox(height: 6),
               Text(
                 title,
-                style: const TextStyle(
-                    fontWeight: FontWeight.bold, fontSize: 11),
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11),
                 textAlign: TextAlign.center,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
@@ -410,7 +396,6 @@ class AppDrawer extends StatelessWidget {
       child: SafeArea(
         child: Column(
           children: [
-            // رأس القائمة
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(20),
@@ -434,7 +419,6 @@ class AppDrawer extends StatelessWidget {
                 ],
               ),
             ),
-            // عناصر القائمة
             Expanded(
               child: ListView(
                 padding: EdgeInsets.zero,
@@ -462,6 +446,10 @@ class AppDrawer extends StatelessWidget {
                     Navigator.pop(context);
                     Navigator.push(context, MaterialPageRoute(builder: (_) => const ShowroomScreen()));
                   }),
+                  _drawerItem(context, Icons.shopping_cart, 'فاتورة بيع', () {
+                    Navigator.pop(context);
+                    Navigator.push(context, MaterialPageRoute(builder: (_) => const SaleScreen()));
+                  }),
                   _drawerItem(context, Icons.account_balance_wallet, 'الخزنة', () {
                     Navigator.pop(context);
                     Navigator.push(context, MaterialPageRoute(builder: (_) => const TreasuryScreen()));
@@ -473,6 +461,14 @@ class AppDrawer extends StatelessWidget {
                   _drawerItem(context, Icons.local_shipping, 'الموزعون', () {
                     Navigator.pop(context);
                     Navigator.push(context, MaterialPageRoute(builder: (_) => const DistributorsScreen()));
+                  }),
+                  _drawerItem(context, Icons.receipt_long, 'جدول الحملات', () {
+                    Navigator.pop(context);
+                    Navigator.push(context, MaterialPageRoute(builder: (_) => const AllLoadsScreen()));
+                  }),
+                  _drawerItem(context, Icons.compare_arrows, 'كشف المقارنة', () {
+                    Navigator.pop(context);
+                    Navigator.push(context, MaterialPageRoute(builder: (_) => const ComparisonReportScreen()));
                   }),
                   _drawerItem(context, Icons.assessment, 'التقارير', () {
                     Navigator.pop(context);
@@ -493,6 +489,14 @@ class AppDrawer extends StatelessWidget {
                   _drawerItem(context, Icons.badge, 'العمال', () {
                     Navigator.pop(context);
                     Navigator.push(context, MaterialPageRoute(builder: (_) => const WorkersScreen()));
+                  }),
+                  _drawerItem(context, Icons.handshake, 'الشركاء المالكين', () {
+                    Navigator.pop(context);
+                    Navigator.push(context, MaterialPageRoute(builder: (_) => const PartnersScreen()));
+                  }),
+                  _drawerItem(context, Icons.build, 'الإصلاحات', () {
+                    Navigator.pop(context);
+                    Navigator.push(context, MaterialPageRoute(builder: (_) => const RepairsScreen()));
                   }),
                   _drawerItem(context, Icons.sync, 'المزامنة', () {
                     Navigator.pop(context);
