@@ -40,7 +40,6 @@ class _SalesReportScreenState extends State<SalesReportScreen> {
     setState(() => _isLoading = true);
     final db = await DatabaseHelper().database;
 
-    // جلب بيانات المبيعات مع تفاصيل الفواتير
     final result = await db.rawQuery('''
       SELECT 
         s.id,
@@ -102,10 +101,10 @@ class _SalesReportScreenState extends State<SalesReportScreen> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _detailRow('العميل', invoice['customer_name'] ?? 'عميل نقدي'),
-              _detailRow('التاريخ', invoice['sale_date'] ?? '-'),
-              _detailRow('طريقة الدفع', invoice['payment_type'] ?? '-'),
-              _detailRow('حالة الدفع', invoice['payment_status'] ?? '-'),
+              _detailRow('العميل', (invoice['customer_name'] ?? 'عميل نقدي').toString()),
+              _detailRow('التاريخ', (invoice['sale_date'] ?? '-').toString()),
+              _detailRow('طريقة الدفع', (invoice['payment_type'] ?? '-').toString()),
+              _detailRow('حالة الدفع', (invoice['payment_status'] ?? '-').toString()),
               _detailRow('الإجمالي', '${invoice['total']}'),
               _detailRow('الخصم', '${invoice['discount']}'),
               _detailRow('الصافي', '${invoice['grand_total']}'),
@@ -114,7 +113,7 @@ class _SalesReportScreenState extends State<SalesReportScreen> {
               const SizedBox(height: 4),
               ...items.map((item) => ListTile(
                 dense: true,
-                title: Text(item['product_name'] ?? ''),
+                title: Text((item['product_name'] ?? '').toString()),
                 subtitle: Text('الكمية: ${item['quantity']} × ${item['unit_price']}'),
                 trailing: Text('${item['total']}'),
               )),
@@ -141,7 +140,6 @@ class _SalesReportScreenState extends State<SalesReportScreen> {
     );
   }
 
-  /// تطبيق الفلاتر والبحث
   void _applyFilters() {
     var list = _data;
     if (_filterDate != null) {
@@ -172,7 +170,6 @@ class _SalesReportScreenState extends State<SalesReportScreen> {
           ? const Center(child: CircularProgressIndicator())
           : Column(
               children: [
-                // ============ البطاقات الإحصائية ============
                 Padding(
                   padding: const EdgeInsets.all(8),
                   child: Row(
@@ -183,8 +180,6 @@ class _SalesReportScreenState extends State<SalesReportScreen> {
                     ],
                   ),
                 ),
-
-                // ============ الفلاتر ============
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 8),
                   child: Row(
@@ -223,8 +218,6 @@ class _SalesReportScreenState extends State<SalesReportScreen> {
                     ],
                   ),
                 ),
-
-                // ============ جدول المبيعات ============
                 Expanded(
                   child: _filteredData.isEmpty
                       ? const Center(child: Text('لا توجد مبيعات'))
@@ -243,11 +236,11 @@ class _SalesReportScreenState extends State<SalesReportScreen> {
                                     size: 20,
                                   ),
                                 ),
-                                title: Text(sale['invoice_number'] ?? ''),
+                                title: Text((sale['invoice_number'] ?? '').toString()),
                                 subtitle: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Text('العميل: ${sale['customer_name'] ?? "نقدي"}'),
+                                    Text('العميل: ${(sale['customer_name'] ?? "نقدي").toString()}'),
                                     Text('${sale['sale_date']} | ${sale['payment_type']} | قطع: ${sale['total_quantity']}'),
                                   ],
                                 ),
