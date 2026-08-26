@@ -93,44 +93,47 @@ class _PartnerAccountScreenState extends State<PartnerAccountScreen> {
 
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('دفع الراتب الشهري'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text('الراتب الشهري: $amount'),
-            const SizedBox(height: 12),
-            DropdownButtonFormField<String>(
-              initialValue: statusCtrl.value,
-              decoration: const InputDecoration(labelText: 'حالة الدفع'),
-              items: const [
-                DropdownMenuItem(value: 'مستحق', child: Text('مستحق')),
-                DropdownMenuItem(value: 'مدفوع جزئياً', child: Text('مدفوع جزئياً')),
-                DropdownMenuItem(value: 'مدفوع بالكامل', child: Text('مدفوع بالكامل')),
-              ],
-              onChanged: (v) => statusCtrl.value = v!,
+      builder: (ctx) => ValueListenableBuilder<String>(
+        valueListenable: statusCtrl,
+        builder: (ctx, statusValue, _) => AlertDialog(
+          title: const Text('دفع الراتب الشهري'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('الراتب الشهري: $amount'),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                value: statusValue,
+                decoration: const InputDecoration(labelText: 'حالة الدفع'),
+                items: const [
+                  DropdownMenuItem(value: 'مستحق', child: Text('مستحق')),
+                  DropdownMenuItem(value: 'مدفوع جزئياً', child: Text('مدفوع جزئياً')),
+                  DropdownMenuItem(value: 'مدفوع بالكامل', child: Text('مدفوع بالكامل')),
+                ],
+                onChanged: (v) => statusCtrl.value = v!,
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء')),
+            ElevatedButton(
+              onPressed: () async {
+                await _repo.addTransaction(
+                  partnerId: widget.partner.id,
+                  transactionType: 'راتب',
+                  amount: amount,
+                  description: 'راتب شهر $_selectedMonth/$_selectedYear',
+                  createdBy: 'admin',
+                  month: _selectedMonth,
+                  year: _selectedYear,
+                  salaryStatus: statusCtrl.value,
+                );
+                Navigator.pop(ctx, true);
+              },
+              child: const Text('تأكيد الدفع'),
             ),
           ],
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء')),
-          ElevatedButton(
-            onPressed: () async {
-              await _repo.addTransaction(
-                partnerId: widget.partner.id,
-                transactionType: 'راتب',
-                amount: amount,
-                description: 'راتب شهر ${_selectedMonth}/${_selectedYear}',
-                createdBy: 'admin',
-                month: _selectedMonth,
-                year: _selectedYear,
-                salaryStatus: statusCtrl.value,
-              );
-              Navigator.pop(ctx, true);
-            },
-            child: const Text('تأكيد الدفع'),
-          ),
-        ],
       ),
     );
 
