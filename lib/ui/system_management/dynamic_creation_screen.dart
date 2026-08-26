@@ -43,7 +43,7 @@ class _DynamicCreationScreenState extends State<DynamicCreationScreen> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 DropdownButtonFormField<String>(
-                  initialValue: selectedType,
+                  value: selectedType,
                   decoration: const InputDecoration(labelText: 'نوع العنصر'),
                   items: const [
                     DropdownMenuItem(value: 'صفحة جديدة', child: Text('صفحة جديدة')),
