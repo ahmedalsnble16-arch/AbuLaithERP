@@ -12,6 +12,8 @@ class DynamicConfiguration {
   final String createdAt;
   final String updatedAt;
   final String? createdBy;
+  final String? syncStatus;
+  final bool deleted;
 
   DynamicConfiguration({
     required this.id,
@@ -27,6 +29,8 @@ class DynamicConfiguration {
     required this.createdAt,
     required this.updatedAt,
     this.createdBy,
+    this.syncStatus,
+    this.deleted = false,
   });
 
   factory DynamicConfiguration.fromMap(Map<String, dynamic> map) {
@@ -44,6 +48,8 @@ class DynamicConfiguration {
       createdAt: map['created_at'] ?? '',
       updatedAt: map['updated_at'] ?? '',
       createdBy: map['created_by'],
+      syncStatus: map['sync_status'],
+      deleted: map['deleted'] == 1,
     );
   }
 
@@ -62,6 +68,8 @@ class DynamicConfiguration {
       'created_at': createdAt,
       'updated_at': updatedAt,
       'created_by': createdBy,
+      'sync_status': syncStatus ?? 'Pending',
+      'deleted': deleted ? 1 : 0,
     };
   }
 }
