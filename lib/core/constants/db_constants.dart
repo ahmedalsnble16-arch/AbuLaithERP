@@ -62,6 +62,10 @@ class DBConstants {
   static const String tableInventoryCounts = 'inventory_counts';
   static const String tableDailyRemaining = 'daily_remaining';
 
+  // ========== إدارة النظام ==========
+  static const String tableDynamicConfigurations = 'dynamic_configurations';
+  static const String tableSystemArchives = 'system_archives';
+
   // ========== النظام ==========
   static const String tableSyncQueue = 'sync_queue';
   static const String tableAuditLogs = 'audit_logs';
