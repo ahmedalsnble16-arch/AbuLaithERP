@@ -78,7 +78,6 @@ class _TreasuryScreenState extends State<TreasuryScreen> {
     final noteCtrl = TextEditingController();
     String? sourceModule;
     String? sourceId;
-    String? sourceName;
 
     final result = await showDialog<bool>(
       context: context,
@@ -118,19 +117,28 @@ class _TreasuryScreenState extends State<TreasuryScreen> {
                 if (sourceModule == 'عميل')
                   DropdownButtonFormField<String?>(
                     decoration: const InputDecoration(labelText: 'اختر العميل'),
-                    items: _customers.map((c) => DropdownMenuItem(value: c.id, child: Text(c.name))).toList(),
+                    items: _customers.map<DropdownMenuItem<String?>>((c) => DropdownMenuItem<String?>(
+                      value: c.id.toString(),
+                      child: Text(c.name.toString()),
+                    )).toList(),
                     onChanged: (val) => setStateDialog(() => sourceId = val),
                   ),
                 if (sourceModule == 'مورد')
                   DropdownButtonFormField<String?>(
                     decoration: const InputDecoration(labelText: 'اختر المورد'),
-                    items: _suppliers.map((s) => DropdownMenuItem(value: s.id, child: Text(s.name))).toList(),
+                    items: _suppliers.map<DropdownMenuItem<String?>>((s) => DropdownMenuItem<String?>(
+                      value: s.id.toString(),
+                      child: Text(s.name.toString()),
+                    )).toList(),
                     onChanged: (val) => setStateDialog(() => sourceId = val),
                   ),
                 if (sourceModule == 'موزع')
                   DropdownButtonFormField<String?>(
                     decoration: const InputDecoration(labelText: 'اختر الموزع'),
-                    items: _distributors.map((d) => DropdownMenuItem(value: d.id, child: Text(d.name))).toList(),
+                    items: _distributors.map<DropdownMenuItem<String?>>((d) => DropdownMenuItem<String?>(
+                      value: d.id.toString(),
+                      child: Text(d.name.toString()),
+                    )).toList(),
                     onChanged: (val) => setStateDialog(() => sourceId = val),
                   ),
               ],
@@ -157,14 +165,12 @@ class _TreasuryScreenState extends State<TreasuryScreen> {
                     createdBy: 'admin',
                   );
 
-                  // خصم من رصيد العميل إذا كان المصدر عميل
                   if (sourceModule == 'عميل' && sourceId != null) {
-                    final customer = _customers.firstWhere((c) => c.id == sourceId);
+                    final customer = _customers.firstWhere((c) => c.id.toString() == sourceId);
                     await _customerRepo.update(customer);
                   }
-                  // خصم من رصيد الموزع إذا كان المصدر موزع
                   if (sourceModule == 'موزع' && sourceId != null) {
-                    final distributor = _distributors.firstWhere((d) => d.id == sourceId);
+                    final distributor = _distributors.firstWhere((d) => d.id.toString() == sourceId);
                     await _distributorRepo.updateDistributor(distributor);
                   }
                 } else {
@@ -176,9 +182,8 @@ class _TreasuryScreenState extends State<TreasuryScreen> {
                     createdBy: 'admin',
                   );
 
-                  // خصم من رصيد المورد إذا كان المصدر مورد
                   if (sourceModule == 'مورد' && sourceId != null) {
-                    final supplier = _suppliers.firstWhere((s) => s.id == sourceId);
+                    final supplier = _suppliers.firstWhere((s) => s.id.toString() == sourceId);
                     await _supplierRepo.update(supplier);
                   }
                 }
@@ -205,13 +210,13 @@ class _TreasuryScreenState extends State<TreasuryScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _detailRow('رقم العملية', transaction.transactionNumber),
-            _detailRow('النوع', transaction.transactionType),
+            _detailRow('رقم العملية', transaction.transactionNumber.toString()),
+            _detailRow('النوع', transaction.transactionType.toString()),
             _detailRow('المبلغ', '${transaction.amount}'),
-            _detailRow('البيان', transaction.note ?? '-'),
-            _detailRow('المصدر', transaction.sourceModule ?? '-'),
-            _detailRow('التاريخ', transaction.transactionDate),
-            _detailRow('المستخدم', transaction.createdBy ?? '-'),
+            _detailRow('البيان', transaction.note?.toString() ?? '-'),
+            _detailRow('المصدر', transaction.sourceModule?.toString() ?? '-'),
+            _detailRow('التاريخ', transaction.transactionDate.toString()),
+            _detailRow('المستخدم', transaction.createdBy?.toString() ?? '-'),
           ],
         ),
         actions: [
@@ -249,7 +254,7 @@ class _TreasuryScreenState extends State<TreasuryScreen> {
     if (_searchQuery.isNotEmpty) {
       list = list.where((t) =>
           (t.note ?? '').toString().toLowerCase().contains(_searchQuery.toLowerCase()) ||
-          t.transactionNumber.toLowerCase().contains(_searchQuery.toLowerCase())
+          t.transactionNumber.toString().toLowerCase().contains(_searchQuery.toLowerCase())
       ).toList();
     }
     return list;
@@ -268,7 +273,6 @@ class _TreasuryScreenState extends State<TreasuryScreen> {
           ? const Center(child: CircularProgressIndicator())
           : Column(
               children: [
-                // ============ البطاقات الإحصائية ============
                 Padding(
                   padding: const EdgeInsets.all(8),
                   child: Column(
@@ -296,7 +300,6 @@ class _TreasuryScreenState extends State<TreasuryScreen> {
                   ),
                 ),
 
-                // ============ أزرار الإضافة ============
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 8),
                   child: Row(
@@ -322,7 +325,6 @@ class _TreasuryScreenState extends State<TreasuryScreen> {
                   ),
                 ),
 
-                // ============ الفلاتر ============
                 Padding(
                   padding: const EdgeInsets.all(8),
                   child: Row(
@@ -373,7 +375,6 @@ class _TreasuryScreenState extends State<TreasuryScreen> {
                   ),
                 ),
 
-                // ============ جدول الحركات ============
                 Expanded(
                   child: _filteredTransactions.isEmpty
                       ? const Center(child: Text('لا توجد حركات'))
@@ -392,7 +393,7 @@ class _TreasuryScreenState extends State<TreasuryScreen> {
                                     color: isReceipt ? AppTheme.successColor : AppTheme.errorColor,
                                   ),
                                 ),
-                                title: Text(t.note ?? 'بدون بيان'),
+                                title: Text(t.note?.toString() ?? 'بدون بيان'),
                                 subtitle: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
