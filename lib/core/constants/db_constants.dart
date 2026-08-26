@@ -50,6 +50,10 @@ class DBConstants {
   static const String tableExpenses = 'expenses';
   static const String tableRevenues = 'revenues';
 
+  // ========== الإصلاحات ==========
+  static const String tableRepairs = 'repairs';
+  static const String tableRepairTypes = 'repair_types';
+
   // ========== الشركاء المالكين ==========
   static const String tablePartners = 'partners';
   static const String tablePartnerTransactions = 'partner_transactions';
