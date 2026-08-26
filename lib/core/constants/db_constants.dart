@@ -50,6 +50,10 @@ class DBConstants {
   static const String tableExpenses = 'expenses';
   static const String tableRevenues = 'revenues';
 
+  // ========== الشركاء المالكين ==========
+  static const String tablePartners = 'partners';
+  static const String tablePartnerTransactions = 'partner_transactions';
+
   // ========== الجرد والمخزون ==========
   static const String tableInventoryCounts = 'inventory_counts';
   static const String tableDailyRemaining = 'daily_remaining';
@@ -61,6 +65,17 @@ class DBConstants {
   static const String tableBackupHistory = 'backup_history';
   static const String tableSettings = 'settings';
   static const String tableDevices = 'devices';
+
+  // ========== أنواع حركات الشركاء ==========
+  static const String partnerTxnSalary = 'راتب';
+  static const String partnerTxnWithdrawal = 'سحب';
+  static const String partnerTxnAdvance = 'براني';
+  static const String partnerTxnExpense = 'مصروف شخصي';
+  static const String partnerTxnLoan = 'سلفة';
+  static const String partnerTxnSettlement = 'تسوية';
+  static const String partnerTxnDeposit = 'إيداع';
+  static const String partnerTxnProfit = 'أرباح مستحقة';
+  static const String partnerTxnProfitPaid = 'أرباح مصروفة';
 
   // ========== الثوابت ==========
   static const String syncPending = 'Pending';
