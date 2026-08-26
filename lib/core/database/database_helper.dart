@@ -929,8 +929,8 @@ class DatabaseHelper {
       )
     ''');
 
-    // ============ الجداول الجديدة المطلوبة ============
-    // جدول التكوينات الديناميكية
+    // ============ الجداول الجديدة المضافة ============
+    // 1. جدول التكوينات الديناميكية
     await db.execute('''
       CREATE TABLE IF NOT EXISTS dynamic_configurations (
         id TEXT PRIMARY KEY,
@@ -951,13 +951,13 @@ class DatabaseHelper {
       )
     ''');
 
-    // جدول أرشيف النظام
+    // 2. جدول أرشيف النظام
     await db.execute('''
       CREATE TABLE IF NOT EXISTS system_archives (
         id TEXT PRIMARY KEY,
         source_table TEXT NOT NULL,
-        source_record_id TEXT NOT NULL,
-        archive_data TEXT NOT NULL,
+        source_record_id TEXT,
+        archive_data TEXT,
         archive_date TEXT NOT NULL,
         archived_by TEXT,
         notes TEXT,
@@ -1247,13 +1247,11 @@ class DatabaseHelper {
         )
       ''');
     }
-    // إضافة عمود الحد الشهري للسحب (الإصدار 11)
     if (oldVersion < 11) {
       await db.execute(
         'ALTER TABLE ${DBConstants.tableWorkers} ADD COLUMN monthly_withdrawal_limit REAL DEFAULT 0'
       );
     }
-    // إضافة جداول الإصلاحات (الإصدار 12)
     if (oldVersion < 12) {
       await db.execute('''
         CREATE TABLE IF NOT EXISTS ${DBConstants.tableRepairTypes} (
@@ -1284,7 +1282,6 @@ class DatabaseHelper {
         )
       ''');
 
-      // إدراج أنواع الإصلاحات الافتراضية
       final now = DateTime.now().toIso8601String();
       final defaultTypes = ['إصلاح معدات', 'إصلاح أدوات', 'إصلاح أجهزة', 'إصلاح كهرباء', 'إصلاح سباكة', 'صيانة', 'تطوير المحل', 'تطوير المعمل', 'شراء/تركيب', 'أخرى'];
       for (var type in defaultTypes) {
@@ -1297,9 +1294,8 @@ class DatabaseHelper {
       }
     }
 
-    // ============ إضافة الجداول الجديدة (الإصدار 13) ============
+    // ============ ترقية القاعدة للإصدار 13 (الجداول الجديدة) ============
     if (oldVersion < 13) {
-      // جدول التكوينات الديناميكية
       await db.execute('''
         CREATE TABLE IF NOT EXISTS dynamic_configurations (
           id TEXT PRIMARY KEY,
@@ -1320,13 +1316,12 @@ class DatabaseHelper {
         )
       ''');
 
-      // جدول أرشيف النظام
       await db.execute('''
         CREATE TABLE IF NOT EXISTS system_archives (
           id TEXT PRIMARY KEY,
           source_table TEXT NOT NULL,
-          source_record_id TEXT NOT NULL,
-          archive_data TEXT NOT NULL,
+          source_record_id TEXT,
+          archive_data TEXT,
           archive_date TEXT NOT NULL,
           archived_by TEXT,
           notes TEXT,
@@ -1334,9 +1329,7 @@ class DatabaseHelper {
         )
       ''');
 
-      // إدراج بيانات افتراضية للتكوينات الديناميكية
       final now = DateTime.now().toIso8601String();
-      
       final dynamicConfigs = [
         {
           'id': 'config_damage_returns',
@@ -1508,7 +1501,6 @@ class DatabaseHelper {
       });
     }
 
-    // إدراج أنواع الإصلاحات الافتراضية
     final defaultRepairTypes = ['إصلاح معدات', 'إصلاح أدوات', 'إصلاح أجهزة', 'إصلاح كهرباء', 'إصلاح سباكة', 'صيانة', 'تطوير المحل', 'تطوير المعمل', 'شراء/تركيب', 'أخرى'];
     for (var type in defaultRepairTypes) {
       await db.insert(DBConstants.tableRepairTypes, {
@@ -1519,7 +1511,6 @@ class DatabaseHelper {
       });
     }
 
-    // إدراج بيانات التكوينات الديناميكية الافتراضية
     final dynamicConfigs = [
       {
         'id': 'config_damage_returns',
