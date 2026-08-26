@@ -4,6 +4,7 @@ import '../../config/theme.dart';
 import '../../core/constants/db_constants.dart';
 import '../../core/database/database_helper.dart';
 import '../../data/repositories/settings_repository.dart';
+import '../system_management/system_management_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -186,7 +187,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const SnackBar(content: Text('تم حفظ جميع الإعدادات'), backgroundColor: AppTheme.successColor),
         );
 
-        // إعادة التوجيه الفوري إذا تم تفعيل تسجيل الدخول
         if (_loginRequired) {
           Navigator.pushReplacementNamed(context, '/');
         }
@@ -350,6 +350,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // ============ مركز إدارة النظام ============
+                  _buildSection('⚙️ مركز إدارة النظام', [
+                    ListTile(
+                      leading: const Icon(Icons.admin_panel_settings, color: AppTheme.primaryColor, size: 32),
+                      title: const Text('مركز إدارة النظام', style: TextStyle(fontWeight: FontWeight.bold)),
+                      subtitle: const Text('إدارة الحذف والإنشاء والعناصر الديناميكية'),
+                      trailing: ElevatedButton(
+                        onPressed: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (_) => const SystemManagementScreen()),
+                          );
+                        },
+                        child: const Text('فتح'),
+                      ),
+                    ),
+                  ]),
+                  // ============================================
+
                   _buildSection('🏢 معلومات المنشأة', [
                     TextField(controller: _companyNameCtrl, decoration: const InputDecoration(labelText: 'اسم المنشأة')),
                     const SizedBox(height: 12),
@@ -374,8 +393,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   _buildSection('🔐 إعدادات الأمان', [
                     TextField(controller: _sessionTimeoutCtrl, decoration: const InputDecoration(labelText: 'مدة الجلسة (دقيقة)'), keyboardType: TextInputType.number),
                   ]),
-
-                  // ============ قسم تسجيل الدخول ============
                   _buildSection('🔐 تسجيل الدخول', [
                     SwitchListTile(
                       title: const Text('يتطلب تسجيل الدخول عند الفتح'),
@@ -390,12 +407,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       onChanged: _loginRequired ? (v) => setState(() => _biometricEnabled = v) : null,
                     ),
                   ]),
-                  // ============================================
-
                   _buildSection('🎨 إعدادات الواجهة', [
                     SwitchListTile(title: const Text('الوضع الداكن'), value: _darkMode, onChanged: (v) => setState(() => _darkMode = v)),
                   ]),
-
                   _buildSection('👥 المستخدمون والصلاحيات', [
                     ListTile(
                       leading: const Icon(Icons.people, color: AppTheme.primaryColor),
@@ -419,7 +433,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       onTap: () => _changePasswordDialog(),
                     ),
                   ]),
-
                   _buildSection('💱 العملة والضرائب', [
                     TextField(controller: _currencySymbolCtrl, decoration: const InputDecoration(labelText: 'رمز العملة')),
                     const SizedBox(height: 12),
