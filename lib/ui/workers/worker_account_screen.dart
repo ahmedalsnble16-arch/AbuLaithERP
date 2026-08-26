@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../config/theme.dart';
 import '../../core/constants/db_constants.dart';
 import '../../core/database/database_helper.dart';
+import '../../data/repositories/worker_repository.dart';
 
 class WorkerAccountScreen extends StatefulWidget {
   final String workerId;
@@ -24,6 +25,7 @@ class WorkerAccountScreen extends StatefulWidget {
 }
 
 class _WorkerAccountScreenState extends State<WorkerAccountScreen> {
+  final WorkerRepository _workerRepo = WorkerRepository();
   String _selectedMonth = DateTime.now().toIso8601String().substring(0, 7);
   List<Map<String, dynamic>> _dailyRows = [];
   double _totalActiveDays = 0;
@@ -32,6 +34,12 @@ class _WorkerAccountScreenState extends State<WorkerAccountScreen> {
   double _totalBraneyat = 0;
   double _totalAdditions = 0;
   bool _isLoading = true;
+
+  // الحد الشهري للسحب
+  double _monthlyLimit = 0;
+  double _monthlyWithdrawn = 0;
+  double _monthlyRemaining = 0;
+  double _consumptionPercent = 0;
 
   @override
   void initState() {
@@ -46,6 +54,12 @@ class _WorkerAccountScreenState extends State<WorkerAccountScreen> {
     final month = int.parse(_selectedMonth.split('-')[1]);
     final daysInMonth = DateTime(year, month + 1, 0).day;
 
+    // جلب الحد الشهري
+    _monthlyLimit = await _workerRepo.getMonthlyWithdrawalLimit(widget.workerId);
+    _monthlyWithdrawn = await _workerRepo.getMonthlyWithdrawals(widget.workerId, month: month, year: year);
+    _monthlyRemaining = _monthlyLimit - _monthlyWithdrawn;
+    _consumptionPercent = _monthlyLimit > 0 ? (_monthlyWithdrawn / _monthlyLimit) * 100 : 0;
+
     // جلب أيام النشاط
     final attendances = await db.query(
       'worker_attendance',
@@ -54,7 +68,7 @@ class _WorkerAccountScreenState extends State<WorkerAccountScreen> {
     );
     final activeDays = attendances.map((a) => a['date'] as String).toSet();
 
-    // جلب المصاريف من worker_daily_expenses
+    // جلب المصاريف
     final expenses1 = await db.rawQuery('''
       SELECT date, COALESCE(SUM(amount), 0) as total
       FROM worker_daily_expenses
@@ -62,7 +76,6 @@ class _WorkerAccountScreenState extends State<WorkerAccountScreen> {
       GROUP BY date
     ''', [widget.workerId, _selectedMonth]);
 
-    // جلب المصاريف من worker_accounts (المصروف اليومي من المعرض)
     final expenses2 = await db.rawQuery('''
       SELECT transaction_date as date, COALESCE(SUM(amount), 0) as total
       FROM ${DBConstants.tableWorkerAccounts}
@@ -70,7 +83,6 @@ class _WorkerAccountScreenState extends State<WorkerAccountScreen> {
       GROUP BY transaction_date
     ''', [widget.workerId, _selectedMonth]);
 
-    // دمج المصاريف من المصدرين
     final expenseMap = <String, double>{};
     for (var e in expenses1) {
       expenseMap[e['date'] as String] = (e['total'] as num?)?.toDouble() ?? 0;
@@ -205,6 +217,35 @@ class _WorkerAccountScreenState extends State<WorkerAccountScreen> {
     if (result == true) _loadMonthData();
   }
 
+  /// تعديل الحد الشهري للسحب
+  Future<void> _editMonthlyLimit() async {
+    final limitCtrl = TextEditingController(text: _monthlyLimit.toString());
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('تعديل الحد الشهري للسحب'),
+        content: TextField(
+          controller: limitCtrl,
+          decoration: const InputDecoration(labelText: 'الحد الأقصى الشهري'),
+          keyboardType: TextInputType.number,
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء')),
+          ElevatedButton(
+            onPressed: () async {
+              final newLimit = double.tryParse(limitCtrl.text) ?? 0;
+              await _workerRepo.updateMonthlyWithdrawalLimit(widget.workerId, newLimit);
+              Navigator.pop(ctx, true);
+            },
+            child: const Text('حفظ'),
+          ),
+        ],
+      ),
+    );
+    if (result == true) _loadMonthData();
+  }
+
   @override
   Widget build(BuildContext context) {
     final netSalary = _totalSalary - _totalExpenses - _totalBraneyat - _totalAdditions;
@@ -248,6 +289,48 @@ class _WorkerAccountScreenState extends State<WorkerAccountScreen> {
                       ),
                     ),
                   ),
+                  const SizedBox(height: 8),
+
+                  // ============ بطاقة الحد الشهري للسحب ============
+                  Card(
+                    color: _monthlyRemaining <= 0 ? AppTheme.errorColor.withAlpha(15) : AppTheme.primaryColor.withAlpha(15),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Text('💳 الحد الشهري للسحب', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                              IconButton(
+                                icon: const Icon(Icons.edit, color: AppTheme.primaryColor),
+                                onPressed: _editMonthlyLimit,
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceAround,
+                            children: [
+                              _infoCard('الحد', '${_monthlyLimit.toStringAsFixed(0)}'),
+                              _infoCard('المسحوب', '${_monthlyWithdrawn.toStringAsFixed(0)}'),
+                              _infoCard('المتبقي', '${_monthlyRemaining.toStringAsFixed(0)}'),
+                              _infoCard('الاستهلاك', '${_consumptionPercent.toStringAsFixed(0)}%'),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          LinearProgressIndicator(
+                            value: _consumptionPercent / 100 > 1 ? 1 : _consumptionPercent / 100,
+                            backgroundColor: Colors.grey.shade200,
+                            color: _consumptionPercent >= 100 ? AppTheme.errorColor : AppTheme.primaryColor,
+                            minHeight: 8,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  // ====================================================
+
                   const SizedBox(height: 8),
                   Card(
                     child: SingleChildScrollView(
