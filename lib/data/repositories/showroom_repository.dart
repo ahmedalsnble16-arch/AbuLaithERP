@@ -3,6 +3,7 @@ import 'package:uuid/uuid.dart';
 import '../../core/constants/db_constants.dart';
 import '../../core/database/database_helper.dart';
 import '../models/showroom_daily_entry.dart';
+import 'worker_repository.dart';
 
 class ShowroomRepository {
   final DatabaseHelper _dbHelper = DatabaseHelper();
@@ -336,7 +337,7 @@ class ShowroomRepository {
     }
   }
 
-  // ========== تم تغيير 'سلفة (برانية)' إلى 'برانية' ==========
+  // ========== حفظ البرانية مع التحقق من الحد الشهري ==========
   Future<void> saveWorkerAdvance({
     required String workerId,
     required double amount,
@@ -345,6 +346,14 @@ class ShowroomRepository {
     String? deviceId,
   }) async {
     await _ensureDayOpen(date);
+
+    // التحقق من الحد الشهري للسحب
+    final workerRepo = WorkerRepository();
+    final error = await workerRepo.canWithdraw(workerId, amount);
+    if (error != null) {
+      throw Exception(error);
+    }
+
     final db = await _dbHelper.database;
     final now = DatabaseHelper.now;
     await db.insert(DBConstants.tableWorkerAccounts, {
