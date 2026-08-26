@@ -6,6 +6,7 @@ class Worker {
   final double salary;
   final double dailySalary;
   final double dailyExpense;
+  final double monthlyWithdrawalLimit;
   final String? cardNumber;
   final String? cardImage;
   final String? hireDate;
@@ -25,6 +26,7 @@ class Worker {
     this.salary = 0,
     this.dailySalary = 0,
     this.dailyExpense = 0,
+    this.monthlyWithdrawalLimit = 0,
     this.cardNumber,
     this.cardImage,
     this.hireDate,
@@ -46,6 +48,7 @@ class Worker {
       salary: (map['salary'] ?? 0).toDouble(),
       dailySalary: (map['daily_salary'] ?? map['salary'] ?? 0).toDouble(),
       dailyExpense: (map['daily_expense'] ?? 0).toDouble(),
+      monthlyWithdrawalLimit: (map['monthly_withdrawal_limit'] ?? 0).toDouble(),
       cardNumber: map['card_number'],
       cardImage: map['card_image'],
       hireDate: map['hire_date'],
@@ -68,6 +71,7 @@ class Worker {
       'salary': salary,
       'daily_salary': dailySalary,
       'daily_expense': dailyExpense,
+      'monthly_withdrawal_limit': monthlyWithdrawalLimit,
       'card_number': cardNumber,
       'card_image': cardImage,
       'hire_date': hireDate,
@@ -88,6 +92,7 @@ class Worker {
     double? salary,
     double? dailySalary,
     double? dailyExpense,
+    double? monthlyWithdrawalLimit,
     String? cardNumber,
     String? cardImage,
     bool? active,
@@ -100,6 +105,7 @@ class Worker {
       salary: salary ?? this.salary,
       dailySalary: dailySalary ?? this.dailySalary,
       dailyExpense: dailyExpense ?? this.dailyExpense,
+      monthlyWithdrawalLimit: monthlyWithdrawalLimit ?? this.monthlyWithdrawalLimit,
       cardNumber: cardNumber ?? this.cardNumber,
       cardImage: cardImage ?? this.cardImage,
       hireDate: hireDate,
