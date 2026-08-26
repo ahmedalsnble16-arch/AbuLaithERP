@@ -12,8 +12,17 @@ class SalesReportScreen extends StatefulWidget {
 
 class _SalesReportScreenState extends State<SalesReportScreen> {
   List<Map<String, dynamic>> _data = [];
+  List<Map<String, dynamic>> _filteredData = [];
   double _totalSales = 0;
+  double _totalItems = 0;
+  int _invoiceCount = 0;
   bool _isLoading = true;
+
+  // الفلاتر
+  String? _filterDate;
+  String? _filterPaymentType;
+  final _searchController = TextEditingController();
+  String _searchQuery = '';
 
   @override
   void initState() {
@@ -21,41 +30,257 @@ class _SalesReportScreenState extends State<SalesReportScreen> {
     _load();
   }
 
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
   Future<void> _load() async {
+    setState(() => _isLoading = true);
     final db = await DatabaseHelper().database;
+
+    // جلب بيانات المبيعات مع تفاصيل الفواتير
     final result = await db.rawQuery('''
-      SELECT s.*, si.product_id, si.quantity, si.unit_price, si.total as item_total, p.name as product_name
+      SELECT 
+        s.id,
+        s.invoice_number,
+        s.customer_name,
+        s.total,
+        s.discount,
+        s.grand_total,
+        s.payment_type,
+        s.payment_status,
+        s.sale_date,
+        s.created_at,
+        COUNT(DISTINCT si.id) as item_count,
+        SUM(si.quantity) as total_quantity
       FROM ${DBConstants.tableSales} s
-      INNER JOIN ${DBConstants.tableSaleItems} si ON s.id = si.sale_id
-      INNER JOIN ${DBConstants.tableProducts} p ON si.product_id = p.id
+      LEFT JOIN ${DBConstants.tableSaleItems} si ON s.id = si.sale_id
       WHERE s.deleted = 0
-      ORDER BY s.sale_date DESC LIMIT 100
+      GROUP BY s.id
+      ORDER BY s.sale_date DESC, s.created_at DESC
+      LIMIT 200
     ''');
-    double total = 0;
-    for (var row in result) { total += (row['grand_total'] as num?)?.toDouble() ?? 0; }
-    setState(() { _data = result; _totalSales = total; _isLoading = false; });
+
+    double totalSales = 0;
+    double totalItems = 0;
+    for (var row in result) {
+      totalSales += (row['grand_total'] as num?)?.toDouble() ?? 0;
+      totalItems += (row['total_quantity'] as num?)?.toDouble() ?? 0;
+    }
+
+    setState(() {
+      _data = result;
+      _filteredData = result;
+      _totalSales = totalSales;
+      _totalItems = totalItems;
+      _invoiceCount = result.length;
+      _isLoading = false;
+    });
+  }
+
+  /// عرض تفاصيل فاتورة محددة
+  Future<void> _showInvoiceDetails(Map<String, dynamic> invoice) async {
+    final db = await DatabaseHelper().database;
+    final items = await db.rawQuery('''
+      SELECT si.*, p.name as product_name
+      FROM ${DBConstants.tableSaleItems} si
+      INNER JOIN ${DBConstants.tableProducts} p ON si.product_id = p.id
+      WHERE si.sale_id = ?
+    ''', [invoice['id']]);
+
+    if (!mounted) return;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('فاتورة ${invoice['invoice_number']}'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _detailRow('العميل', invoice['customer_name'] ?? 'عميل نقدي'),
+              _detailRow('التاريخ', invoice['sale_date'] ?? '-'),
+              _detailRow('طريقة الدفع', invoice['payment_type'] ?? '-'),
+              _detailRow('حالة الدفع', invoice['payment_status'] ?? '-'),
+              _detailRow('الإجمالي', '${invoice['total']}'),
+              _detailRow('الخصم', '${invoice['discount']}'),
+              _detailRow('الصافي', '${invoice['grand_total']}'),
+              const Divider(),
+              const Text('بنود الفاتورة:', style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 4),
+              ...items.map((item) => ListTile(
+                dense: true,
+                title: Text(item['product_name'] ?? ''),
+                subtitle: Text('الكمية: ${item['quantity']} × ${item['unit_price']}'),
+                trailing: Text('${item['total']}'),
+              )),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إغلاق')),
+        ],
+      ),
+    );
+  }
+
+  Widget _detailRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: const TextStyle(fontWeight: FontWeight.bold)),
+          Text(value),
+        ],
+      ),
+    );
+  }
+
+  /// تطبيق الفلاتر والبحث
+  void _applyFilters() {
+    var list = _data;
+    if (_filterDate != null) {
+      list = list.where((d) => d['sale_date'] == _filterDate).toList();
+    }
+    if (_filterPaymentType != null) {
+      list = list.where((d) => d['payment_type'] == _filterPaymentType).toList();
+    }
+    if (_searchQuery.isNotEmpty) {
+      list = list.where((d) =>
+          (d['customer_name'] ?? '').toString().toLowerCase().contains(_searchQuery.toLowerCase()) ||
+          (d['invoice_number'] ?? '').toString().toLowerCase().contains(_searchQuery.toLowerCase())
+      ).toList();
+    }
+    setState(() => _filteredData = list);
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('تقرير المبيعات')),
-      body: _isLoading ? const Center(child: CircularProgressIndicator())
-          : Column(children: [
-              Padding(padding: const EdgeInsets.all(16), child: Card(child: Padding(padding: const EdgeInsets.all(16), child: Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
-                Text('عدد الفواتير: ${_data.length}', style: const TextStyle(fontWeight: FontWeight.bold)),
-                Text('إجمالي المبيعات: $_totalSales', style: const TextStyle(color: AppTheme.successColor, fontWeight: FontWeight.bold)),
-              ])))),
-              Expanded(child: ListView.builder(itemCount: _data.length, itemBuilder: (context, index) {
-                final row = _data[index];
-                return ListTile(
-                  leading: const CircleAvatar(backgroundColor: Colors.teal, child: Icon(Icons.receipt, color: Colors.white)),
-                  title: Text(row['product_name'] ?? ''),
-                  subtitle: Text('${row['sale_date']} | ${row['payment_type']}'),
-                  trailing: Text('${row['item_total']}'),
-                );
-              })),
-            ]),
+      appBar: AppBar(
+        title: const Text('تقرير المبيعات'),
+        actions: [
+          IconButton(icon: const Icon(Icons.refresh), onPressed: _load),
+        ],
+      ),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : Column(
+              children: [
+                // ============ البطاقات الإحصائية ============
+                Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: Row(
+                    children: [
+                      _statCard('عدد الفواتير', '$_invoiceCount', AppTheme.primaryColor),
+                      _statCard('إجمالي المبيعات', _totalSales.toStringAsFixed(2), AppTheme.successColor),
+                      _statCard('إجمالي القطع', '${_totalItems.toInt()}', AppTheme.warningColor),
+                    ],
+                  ),
+                ),
+
+                // ============ الفلاتر ============
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: DropdownButton<String?>(
+                          hint: const Text('طريقة الدفع'),
+                          value: _filterPaymentType,
+                          items: const [
+                            DropdownMenuItem(value: null, child: Text('الكل')),
+                            DropdownMenuItem(value: 'نقدي', child: Text('نقدي')),
+                            DropdownMenuItem(value: 'آجل', child: Text('آجل')),
+                          ],
+                          onChanged: (v) {
+                            _filterPaymentType = v;
+                            _applyFilters();
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: TextField(
+                          controller: _searchController,
+                          decoration: const InputDecoration(
+                            hintText: 'بحث (عميل/فاتورة)...',
+                            isDense: true,
+                            border: OutlineInputBorder(),
+                            prefixIcon: Icon(Icons.search),
+                          ),
+                          onChanged: (v) {
+                            _searchQuery = v;
+                            _applyFilters();
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                // ============ جدول المبيعات ============
+                Expanded(
+                  child: _filteredData.isEmpty
+                      ? const Center(child: Text('لا توجد مبيعات'))
+                      : ListView.builder(
+                          itemCount: _filteredData.length,
+                          itemBuilder: (context, index) {
+                            final sale = _filteredData[index];
+                            return Card(
+                              margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              child: ListTile(
+                                leading: CircleAvatar(
+                                  backgroundColor: sale['payment_type'] == 'نقدي' ? AppTheme.successColor : AppTheme.warningColor,
+                                  child: Icon(
+                                    sale['payment_type'] == 'نقدي' ? Icons.payments : Icons.receipt_long,
+                                    color: Colors.white,
+                                    size: 20,
+                                  ),
+                                ),
+                                title: Text(sale['invoice_number'] ?? ''),
+                                subtitle: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text('العميل: ${sale['customer_name'] ?? "نقدي"}'),
+                                    Text('${sale['sale_date']} | ${sale['payment_type']} | قطع: ${sale['total_quantity']}'),
+                                  ],
+                                ),
+                                trailing: Text(
+                                  '${sale['grand_total']}',
+                                  style: const TextStyle(fontWeight: FontWeight.bold, color: AppTheme.primaryColor),
+                                ),
+                                onTap: () => _showInvoiceDetails(sale),
+                              ),
+                            );
+                          },
+                        ),
+                ),
+              ],
+            ),
+    );
+  }
+
+  Widget _statCard(String title, String value, Color color) {
+    return Expanded(
+      child: Card(
+        color: color.withAlpha(15),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            children: [
+              Text(title, style: const TextStyle(fontSize: 11)),
+              const SizedBox(height: 4),
+              Text(value, style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: color)),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
