@@ -24,6 +24,25 @@ jobs:
       - name: Create fresh Android platform files
         run: flutter create . --project-name abu_laith_erp --org com.abulaith --platforms android
       
+      - name: Fix MainActivity for biometric support
+        run: |
+          cat > android/app/src/main/kotlin/com/abulaith/abu_laith_erp/MainActivity.kt << 'EOF'
+          package com.abulaith.abu_laith_erp
+          
+          import io.flutter.embedding.android.FlutterFragmentActivity
+          import io.flutter.embedding.engine.FlutterEngine
+          
+          class MainActivity : FlutterFragmentActivity() {
+              override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+                  super.configureFlutterEngine(flutterEngine)
+              }
+          }
+          EOF
+      
+      - name: Add biometric permissions to AndroidManifest
+        run: |
+          sed -i 's|</manifest>|    <uses-permission android:name="android.permission.USE_BIOMETRIC" />\n    <uses-permission android:name="android.permission.USE_FINGERPRINT" />\n</manifest>|' android/app/src/main/AndroidManifest.xml
+      
       - name: Install dependencies
         run: flutter pub get
       
